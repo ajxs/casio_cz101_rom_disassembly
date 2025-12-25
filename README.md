@@ -33,7 +33,7 @@ The following stylistic conventions have been used in the disassembly:
 - Variables and subroutines have their address added as a suffix, e.g., `important_subroutine_0f34`. This helps name and distinguish unknown variables during disassembly, and makes it easy to reference the source code from other tools, such as MAME.
 - When a variable or subroutine's purpose is still unknown, the labels sometimes include `UNKNOWN` or `MAYBE`. Disassembly involves a lot of guesswork. Sometimes it helps to label things with your best guess, until you're able to clarify its purpose later. E.g. the label `MAYBE_patch_index_save_8028` describes a variable that is *probably* used to track the patch save index; `UNKNOWN_keyboard_flags_8013` describes some kind of keyboard flags variable, whose actual purpose is unknown.
 - Constants definitions are uppercase, while definitions relating to addresses in the ROM are lowercase.
-- In certain places constants bytes have been added where the assembler (see above) has been unable to generate bit-perfect output. The equivalent assembly instruction is added in a comment. This has happened because of a difference in how AS encodes `LDAX (DE+0)` from whatever assembler the original engineers used (probably NEC's RA87).
+- In certain places constants bytes have been added where the assembler (see above) has been unable to generate bit-perfect output. The equivalent assembly instruction is added in a comment. This has happened because of a difference in how AS encodes instructions with *'Base index addressing'* (such as  `LDAX (DE+0)`), from whatever assembler the original engineers used (probably NEC's RA87).
 Such as:
 ```
     DW 00ABh   ;    LDAX        (DE+00h)
