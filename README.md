@@ -20,6 +20,8 @@ The ROM can be built with Alfred Arnold's [AS](http://john.ccac.rwth-aachen.de:8
 
 ## Naming Conventions
 
+> 'There are only two hard things in Computer Science: cache invalidation, naming things, and off-by-one errors.' - Humorous take on [original quote](https://skeptics.stackexchange.com/questions/19836/has-phil-karlton-ever-said-there-are-only-two-hard-things-in-computer-science) by Phil Karlton
+
 The following nomenclature is used in the disassembly. This might differ from official Casio documentation, however I've decided to stick to the modern synth terminology where appropriate. Such as *'voice'* rather than *'note'*, and *'patch'* rather than *'voice'*.
 
 - **Channel** refers to the individual MIDI channels that the synth uses to play a different timbre. The synth has 4, which can be accessed via MIDI.
