@@ -1193,130 +1193,130 @@ _exit_02a6:
     DB          00Dh
     DB          60h
     DB          067h
-    DB          00Ch    ;
-    DB          60h    ;`
-    DB          076h    ;v
-    DB          0B8h    ;
-    DB          00Fh    ;
-    DB          60h    ;`
-    DB          065h    ;e
-    DB          00Eh    ;
-    DB          60h    ;`
-    DB          074h    ;t
-    DB          0B8h    ;
-    DB          40h    ;@
-    DB          02Ah    ;*
-    DB          003h    ;
-    DB          074h    ;t
-    DB          16h    ;
-    DB          0FFh    ;
-    DB          074h    ;t
-    DB          017h    ;
-    DB          0FFh    ;
-    DB          074h    ;t
-    DB          047h    ;G
-    DB          001h    ;
-    DB          048h    ;H
-    DB          00Ah    ;
-    DB          0B8h    ;
-    DB          074h    ;t
-    DB          046h    ;F
-    DB          001h    ;
-    DB          0B8h    ;
-    DB          40h    ;@
-    DB          031h    ;1
-    DB          003h    ;
-    DB          074h    ;t
-    DB          014h    ;
-    DB          0FFh    ;
-    DB          074h    ;t
-    DB          015h    ;
-    DB          0FFh    ;
-    DB          074h    ;t
-    DB          045h    ;E
-    DB          001h    ;
-    DB          048h    ;H
-    DB          00Ah    ;
-    DB          0B8h    ;
-    DB          074h    ;t
-    DB          044h    ;D
-    DB          001h    ;
-    DB          0B8h    ;
-    DB          00Eh    ;
-    DB          60h    ;`
-    DB          0FCh    ;
-    DB          0CEh    ;
-    DB          00Fh    ;
-    DB          60h    ;`
-    DB          0FDh    ;
-    DB          0C3h    ;
-    DB          069h    ;i
-    DB          001h    ;
-    DB          0B8h    ;
-    DB          60h    ;`
-    DB          0BDh    ;
-    DB          069h    ;i
-    DB          002h    ;
-    DB          069h    ;i
-    DB          004h    ;
-    DB          0B8h    ;
-    DB          60h    ;`
-    DB          0BCh    ;
-    DB          069h    ;i
-    DB          002h    ;
-    DB          069h    ;i
-    DB          004h    ;
-    DB          0B8h    ;
-    DB          00Eh    ;
-    DB          60h    ;`
-    DB          0FAh    ;
-    DB          0CEh    ;
-    DB          00Fh    ;
-    DB          60h    ;`
-    DB          0FBh    ;
-    DB          0C3h    ;
-    DB          069h    ;i
-    DB          001h    ;
-    DB          0B8h    ;
-    DB          60h    ;`
-    DB          0BBh    ;
-    DB          069h    ;i
-    DB          002h    ;
-    DB          069h    ;i
-    DB          004h    ;
-    DB          0B8h    ;
-    DB          60h    ;`
-    DB          0BAh    ;
-    DB          069h    ;i
-    DB          002h    ;
-    DB          069h    ;i
-    DB          004h    ;
-    DB          0B8h    ;
-    DB          00Ch    ;
-    DB          60h    ;`
-    DB          0FAh    ;
-    DB          0CEh    ;
-    DB          00Dh    ;
-    DB          60h    ;`
-    DB          0FBh    ;
-    DB          0C3h    ;
-    DB          069h    ;i
-    DB          001h    ;
-    DB          0B8h    ;
-    DB          60h    ;`
-    DB          0BBh    ;
-    DB          069h    ;i
-    DB          002h    ;
-    DB          069h    ;i
-    DB          004h    ;
-    DB          0B8h    ;
-    DB          60h    ;`
-    DB          0BAh    ;
-    DB          069h    ;i
-    DB          002h    ;
-    DB          069h    ;i
-    DB          004h    ;
-    DB          0B8h    ;
+    DB          00Ch
+    DB          60h
+    DB          076h
+    DB          0B8h
+    DB          00Fh
+    DB          60h
+    DB          065h
+    DB          00Eh
+    DB          60h
+    DB          074h
+    DB          0B8h
+    DB          40h
+    DB          02Ah
+    DB          003h
+    DB          074h
+    DB          16h
+    DB          0FFh
+    DB          074h
+    DB          017h
+    DB          0FFh
+    DB          074h
+    DB          047h
+    DB          001h
+    DB          048h
+    DB          00Ah
+    DB          0B8h
+    DB          074h
+    DB          046h
+    DB          001h
+    DB          0B8h
+    DB          40h
+    DB          031h
+    DB          003h
+    DB          074h
+    DB          014h
+    DB          0FFh
+    DB          074h
+    DB          015h
+    DB          0FFh
+    DB          074h
+    DB          045h
+    DB          001h
+    DB          048h
+    DB          00Ah
+    DB          0B8h
+    DB          074h
+    DB          044h
+    DB          001h
+    DB          0B8h
+    DB          00Eh
+    DB          60h
+    DB          0FCh
+    DB          0CEh
+    DB          00Fh
+    DB          60h
+    DB          0FDh
+    DB          0C3h
+    DB          069h
+    DB          001h
+    DB          0B8h
+    DB          60h
+    DB          0BDh
+    DB          069h
+    DB          002h
+    DB          069h
+    DB          004h
+    DB          0B8h
+    DB          60h
+    DB          0BCh
+    DB          069h
+    DB          002h
+    DB          069h
+    DB          004h
+    DB          0B8h
+    DB          00Eh
+    DB          60h
+    DB          0FAh
+    DB          0CEh
+    DB          00Fh
+    DB          60h
+    DB          0FBh
+    DB          0C3h
+    DB          069h
+    DB          001h
+    DB          0B8h
+    DB          60h
+    DB          0BBh
+    DB          069h
+    DB          002h
+    DB          069h
+    DB          004h
+    DB          0B8h
+    DB          60h
+    DB          0BAh
+    DB          069h
+    DB          002h
+    DB          069h
+    DB          004h
+    DB          0B8h
+    DB          00Ch
+    DB          60h
+    DB          0FAh
+    DB          0CEh
+    DB          00Dh
+    DB          60h
+    DB          0FBh
+    DB          0C3h
+    DB          069h
+    DB          001h
+    DB          0B8h
+    DB          60h
+    DB          0BBh
+    DB          069h
+    DB          002h
+    DB          069h
+    DB          004h
+    DB          0B8h
+    DB          60h
+    DB          0BAh
+    DB          069h
+    DB          002h
+    DB          069h
+    DB          004h
+    DB          0B8h
 
 pitch_bend_curve_03a9:
     DW          028h
@@ -13903,7 +13903,7 @@ string_preset_elec_organ:
     DB          000h
     DB          012h
     DB          "ELEC.ORGAN"
-    DB          01Fh    ;
+    DB          01Fh
 str_preset_flute:
     DB          000h
     DB          014h
