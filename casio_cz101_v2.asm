@@ -56,7 +56,11 @@ UNKNOWN_flags_8031:                                             EQU 8031h
 midi_basic_channel_override_8032:                               EQU 8032h
 midi_basic_channel_overridden_8033:                             EQU 8033h
 midi_incoming_solo_voice_index_8034:                            EQU 8034h
-UNKNOWN_midi_8035:                                              EQU 8035h
+; There seems to be some evidence that the code in this firmware is, or could
+; have been shared between different CZ synths.
+; Potentially this value could have been configured based on what degree of
+; multitimbrality the synth supports.
+midi_solo_max_voice_index_8035:                                 EQU 8035h
 midi_prog_change_disabled_8036:                                 EQU 8036h
 ui_flags_8037:                                                  EQU 8037h
 
@@ -909,7 +913,7 @@ upd933_write_register_in_c_voice_a_data_in_ea_0218:
 ; Essentially A * BC.
 ;
 ; Returns:
-; EA: (A * B) + ((A * C) >> 8).
+; EA: (A × BC) >> 8
 ; =============================================================================
 multiply_a_by_bc_022b:
     PUSH        HL
@@ -928,8 +932,7 @@ multiply_a_by_bc_022b:
 ; Performs a 16-bit multiplication.
 ;
 ; Returns:
-; @TODO: Does this shift?
-; EA: (A * C) + (((A * B) & 0x00FF) << 8)
+; EA: (A × BC) & 0xFFFF
 ; =============================================================================
 multiply_a_by_bc_0236:
     PUSH        HL
@@ -5088,7 +5091,8 @@ midi_process_message_30a1:
     NEI         A,0F7h
     JRE         midi_sysex_set_inactive_and_reset_30fd
 
-; Is this an unsupported message?
+; System real-time messages (> 0xF6) are ignored.
+; System common messages (0xF1-0xF6) reset SysEx state.
     GTI         A,0F6h
     JRE         midi_sysex_set_inactive_and_reset_30fd
 
@@ -5164,6 +5168,7 @@ midi_sysex_set_inactive_and_reset_30fd:
     MVIW        (V_OFFSET(midi_sysex_rx_active_805f)),0
     JR          midi_sysex_reset_30e3
 
+; Unreachable code.
     RET
 
 ; =============================================================================
@@ -5238,7 +5243,7 @@ midi_process_message_complete_312b:
 
     MVI         A,0
 
-store_solo_voice_index_3142:
+store_midi_voice_index_3142:
     STAW        (V_OFFSET(midi_incoming_solo_voice_index_8034))
 
 ; Load MIDI status byte.
@@ -5256,7 +5261,7 @@ store_solo_voice_index_3142:
     DW          midi_process_note_on_3180
     DW          return_4c35                         ; Aftertouch.
     DW          midi_process_cc_31a6
-    DW          midi_process_prog_change_UNKNOWN_32d5
+    DW          midi_process_prog_change_32d5
     DW          return_4c35
     DW          midi_process_pitch_bend_330b
     DW          return_4c35
@@ -5268,8 +5273,8 @@ midi_process_message_complete_solo_mode_active_3161:
     SUBNB       A,B                                 ; Skip if no borrow.
     RET
 
-    GTAW        (V_OFFSET(UNKNOWN_midi_8035))       ; Skip if A > 08035h.
-    JRE         store_solo_voice_index_3142
+    GTAW        (V_OFFSET(midi_solo_max_voice_index_8035))       ; Skip if A > 08035h.
+    JRE         store_midi_voice_index_3142
 
     RET
 
@@ -5435,11 +5440,11 @@ midi_process_mode_change_poly_off_320b:
     JR          _solo_mode_disabled_321e
 
 ; Solo mode active.
-    NEAW        (V_OFFSET(UNKNOWN_midi_8035))
+    NEAW        (V_OFFSET(midi_solo_max_voice_index_8035))
     RET
 
 _solo_mode_disabled_321e:
-    STAW        (V_OFFSET(UNKNOWN_midi_8035))
+    STAW        (V_OFFSET(midi_solo_max_voice_index_8035))
 
 ; Disable tone mix.
     ANIW        (V_OFFSET(UNKNOWN_flags_8031)),~FLAGS_8031_TONE_MIX
@@ -5462,7 +5467,7 @@ midi_process_mode_change_poly_on_322d:
 
 ; Disable solo mode.
     ANIW        (V_OFFSET(UNKNOWN_flags_8031)),~FLAGS_8031_SOLO_MODE
-    MVIW        (V_OFFSET(UNKNOWN_midi_8035)),3
+    MVIW        (V_OFFSET(midi_solo_max_voice_index_8035)),3
 
     CALL        midi_process_mode_change_poly_unknown_UNKNOWN_510c
     RET
@@ -5591,7 +5596,7 @@ midi_process_cc_UNKNOWN_32b4:
     RET
 
 ; =============================================================================
-midi_process_prog_change_UNKNOWN_32d5:
+midi_process_prog_change_32d5:
     OFFIW       (V_OFFSET(midi_prog_change_disabled_8036)),1    ; Skip if 08036h & 1h == 0.
     RET
 
@@ -12682,7 +12687,7 @@ input_solo_50fa:
     XRI         A,FLAGS_8031_SOLO_MODE
     STAW        (V_OFFSET(UNKNOWN_flags_8031))
 
-    MVIW        (V_OFFSET(UNKNOWN_midi_8035)),3
+    MVIW        (V_OFFSET(midi_solo_max_voice_index_8035)),3
 
 ; =============================================================================
 midi_process_mode_change_poly_unknown_UNKNOWN_510c:
