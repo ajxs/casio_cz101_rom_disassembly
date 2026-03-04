@@ -164,7 +164,7 @@ FLAGS_80C9_PITCH_BEND_ACTIVE:                                   EQU 80h
 UNKNOWN_flags_80c9:                                             EQU 80c9h
 upd933_data_master_tune_80ca:                                   EQU 80cah
 pitch_bend_input_80cc:                                          EQU 80cch
-upd933_data_portamento_MAYBE_80cd:                              EQU 80cdh
+portamento_freq_increment_80cd:                              EQU 80cdh
 UNKNOWN_pitch_bend_word_80cf:                                   EQU 80cfh
 UNKNOWN_pointer_to_patch_data_80d1:                             EQU 80d1h
 MAYBE_voice_number_80d3:                                        EQU 80d3h
@@ -458,7 +458,7 @@ CHANNEL_INFO_9:                                 EQU 9
 
 
 CHANNEL_INFO_FLAGS_80:                          EQU 1 << 7
-CHANNEL_INFO_FLAGS_8:                           EQU 1 << 2
+CHANNEL_INFO_FLAGS_8:                           EQU 1 << 3
 CHANNEL_INFO_FLAGS_SOLO:                        EQU 1 << 2
 CHANNEL_INFO_FLAGS_PORTA:                       EQU 1 << 1
 CHANNEL_INFO_FLAGS_TONE_MIX:                    EQU 1 << 0
@@ -1028,11 +1028,11 @@ subtract_de_from_ea_clamp_at_0_024b:
 ; =============================================================================
 ; Very similar to vibrato update routines.
 ; Does this scale an 8-bit value into a 16-bit fixed point value?
-; A: ?
+; A:  100 - portamento_time
 ; Returns:
-; BC: ?
+; BC: The calculated frequency increment.
 ; =============================================================================
-portamento_time_modified_create_16_bit_value_UNKNOWN_0287:
+portamento_time_modified_create_freq_increment_0287:
     MOV         C,A
     ANI         C,00001111b
 
@@ -3355,6 +3355,9 @@ portamento_time_modified_28c0:
     CALL        ui_portamento_time_2b96
 ; Falls-through below.
 
+; =============================================================================
+; A: Portamento time value.
+; =============================================================================
 portamento_time_modified_update_28ce:
     CALL        UNKNOWN_patch_load_41d8
     CALL        channel_get_info_table_ptr_for_selected_solo_voice_479d
@@ -10253,7 +10256,7 @@ note_on_jumpoff_47db:
     JB
     DW          note_on_basic_mode_483a
     DW          note_on_tone_mix_MAYBE_4859
-    DW          UNKNOWN_note_on_basic_porta_on_4881
+    DW          note_on_basic_porta_on_4881
     DW          UNKNOWN_note_on_sub_solo_mode_4894
     DW          UNKNOWN_note_on_solo_mode_porta_on_48b4
     DW          UNKNOWN_note_on_solo_mode_porta_on_48b4
@@ -10402,7 +10405,7 @@ UNKNOWN_note_off_sub_4872:
     JRE         note_on_tone_mix_MAYBE_4859
 
 ; =============================================================================
-UNKNOWN_note_on_basic_porta_on_4881:
+note_on_basic_porta_on_4881:
     CALL        FUN_492e
     JR          UNKNOWN_note_on_basic_porta_on_488c
 
@@ -10434,6 +10437,7 @@ UNKNOWN_note_on_solo_mode_porta_on_multiple_voices_4896:
     PUSH        DE
     CALL        note_on_UNKNOWN_4a1a
     POP         DE
+
 LAB_489b:
     CALL        note_on_UNKNOWN_49ff
     CALL        FUN_4a90
@@ -10670,7 +10674,7 @@ LAB_494a:
 ; =============================================================================
 note_on_sets_channel_flag_UNKNOWN_494f:
     LDAX        (HL+CHANNEL_INFO_FLAGS)
-    ORI         A,VOICE_INFO_8640_13_8
+    ORI         A,CHANNEL_INFO_FLAGS_8
     STAX        (HL+CHANNEL_INFO_FLAGS)
     RET
 
@@ -10678,9 +10682,9 @@ note_on_sets_channel_flag_UNKNOWN_494f:
 ; HL: Channel Info (0x8100).
 ; =============================================================================
 note_off_clears_channel_flag_UNKNOWN_4954:
-    LDAX        (HL)
-    ANI         A,(~VOICE_INFO_8640_13_8)
-    STAX        (HL)
+    LDAX        (HL+CHANNEL_INFO_FLAGS)
+    ANI         A,(~CHANNEL_INFO_FLAGS_8)
+    STAX        (HL+CHANNEL_INFO_FLAGS)
     RET
 
 ; =============================================================================
@@ -15289,30 +15293,38 @@ porta_UNKNOWN_70dd:
     LDAX        (HL+VOICE_INFO_8640_d)
     STAX        (HL+VOICE_INFO_8640_a)
     CALL        FUN_70c4
-    LDAX        (HL+0Ch)
-    LBCD        (upd933_data_portamento_MAYBE_80cd)
+    LDAX        (HL+VOICE_INFO_8640_C_WORD)
+    LBCD        (portamento_freq_increment_80cd)
     PUSH        V
     MVI         A,0
-    STAX        (HL+14)
-    STAX        (HL+0Fh)
-    STAX        (HL+010h)
+    STAX        (HL+VOICE_INFO_8640_e)
+    STAX        (HL+VOICE_INFO_8640_F_WORD)
+    STAX        (HL+VOICE_INFO_8640_10)
     POP         V
     LTI         A,7Fh
     MVI         A,7Fh
+; Falls-through below.
 
 ; =============================================================================
-FUN_7103:
-    CALL        FUN_71b4
+; BC: Portamento increment?
+; HL: Voice data (0x8640[voice]).
+; =============================================================================
+porta_UNKNOWN_7103:
+    CALL        porta_multiply_a_by_bc_24_bit_71b4
     MVI         C,0
+
     SLR         A
     DRLR        EA
     RLR         C
+
     SLR         A
     DRLR        EA
     RLR         C
+
     SLR         A
     DRLR        EA
     RLR         C
+
     STEAX       (HL+023h)
     MOV         A,C
     STAX        (HL+22h)
@@ -15427,19 +15439,40 @@ LAB_71b0:
     RET
 
 ; =============================================================================
-FUN_71b4:
+; Computes the full 24-bit product of A × BC.
+; A:  Pitch distance (0x00–0x7F)?
+; BC: Portamento increment.
+; Returns:
+; EA: Low 16 bits.
+; A:  High 8 bits.
+; =============================================================================
+porta_multiply_a_by_bc_24_bit_71b4:
     PUSH        HL
+; EA = A * C
     MUL         C
     PUSH        EA
+
+; EA = A * B
     MUL         B
+
+; Save EAH.
     MOV         A,EAH
     PUSH        V
+
+; H  = low_byte(A * B)
     MOV         A,EAL
     MOV         H,A
     MVI         L,0
+
+; Restore A  = high_byte(A * B)
     POP         V
+; Restore EA = (A * C)
     POP         EA
+
+; EA = (A * C) + low_byte(A * B) * 256
     DADD        EA,HL
+
+; Increment A if the addition carried
     SKN         CY
     INR         A
     POP         HL
@@ -16997,8 +17030,8 @@ LAB_7907:
     LDAX        (HL+0ah)
     CALL        FUN_70c4
     LDAX        (HL+0Ch)
-    LBCD        (upd933_data_portamento_MAYBE_80cd)
-    CALL        FUN_7103
+    LBCD        (portamento_freq_increment_80cd)
+    CALL        porta_UNKNOWN_7103
     JR          LAB_7928
 
 LAB_7921:
@@ -17243,16 +17276,15 @@ portamento_time_calculate_final_value_7a16:
     JR          _store_value_7a2d
 
 _value_above_5_7a24:
+; A = (99 - portamento_time) + 1.
     MOV         B,A
-
-; A = (99 - B) + 1.
     MVI         A,99
     SUB         A,B
     INR         A
-    CALL        portamento_time_modified_create_16_bit_value_UNKNOWN_0287
+    CALL        portamento_time_modified_create_freq_increment_0287
 
 _store_value_7a2d:
-    SBCD        (upd933_data_portamento_MAYBE_80cd)
+    SBCD        (portamento_freq_increment_80cd)
     RET
 
 portamento_data_time_less_than_5_7a32:
