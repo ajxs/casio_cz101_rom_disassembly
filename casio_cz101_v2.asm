@@ -9489,7 +9489,7 @@ main_44a7:
     CALL        keyboard_scan_keys_4670
     EQIW        (V_OFFSET(keyboard_input_group_first_changed_8010)),0FFh
     CALL        keyboard_handle_active_keys_472e
-    CALL        input_scan_switches_MAYBE_46cd
+    CALL        input_scan_switches_46cd
 
 ; Check if any input lines are active. If so, handle the button event.
 ; If no lines are active, it will be 0xFF.
@@ -9892,13 +9892,11 @@ _scan_key_group_loop_467e:
 ; Advance PB to the next matrix line.
     ADI         PB,1
 
-; Is A == B?
-; If not, skip this group.
+; Is A == B? If not, skip this group.
     EQA         A,B
     JRE         _skip_to_next_group_46c6
 
-; Is A == D?
-; If not, skip this group.
+; Is A == D? If not, skip this group.
     EQA         A,D
     JRE         _skip_to_next_group_46c6
 
@@ -9979,72 +9977,65 @@ _skip_to_next_group_46c6:
     JR          _advance_loop_46bf
 
 ; =============================================================================
-input_scan_switches_MAYBE_46cd:
+input_scan_switches_46cd:
     MVIW        (V_OFFSET(keyboard_input_active_line_8012)),0FFh
 
-; The front-panel buttons start at input matrix group 9.
+; The front-panel buttons start at input matrix group 10.
     MVI         C,9
     LXI         HL,input_group_kc10_8166
 
     ANI         PB,11111001b
     ORI         PB,1001b
 
-_scan_switch_group_46db:
-; Looks like it reads 3 times, and then
-; checks all reads are identical.
+_scan_switch_group_loop_46db:
+; Scan the input group 3 times, and check all reads are identical.
     DI
     MOV         B,(keyboard_switch_matrix_b800)
     MOV         A,(keyboard_switch_matrix_b800)
     MOV         D,(keyboard_switch_matrix_b800)
     EI
 
-    LTI         C,0Fh
-    JRE         LAB_4722
+    LTI         C,15
+    JRE         _scan_kc16_4722
 
     ADI         PB,1
 
-LAB_46f1:
-; Is A == B?
-; If not, skip this group.
+_validate_switch_read_46f1:
+; Is A == B? If not, skip this group.
     EQA         A,B
     JRE         _skip_to_next_group_4727
 
-; Is A == D?
-; If not, skip this group.
+; Is A == D? If not, skip this group.
     EQA         A,D
     JRE         _skip_to_next_group_4727
 
+; The following code builds a small 6-byte history for this group, combining
+; the current scan's 6 bytes with the previous scan's 6 data, so a keypress
+; persists across a few scan passes.
+; This avoids a keypress being missed by the consumer if it's pressed and
+; released between polls.
+; Refer to the documentation for keyboard_scan_keys_4670
     LDEAX       (HL)
     DMOV        DE,EA
 
-; Invert the value read.
     XRI         A,0FFh
-
-; Store the read bitmask in group[0].
     STAX        (HL+)
 
-; Combine this value with the existing input line bitmask read from DE, and
-; group[1] = All active lines.
     ORA         A,E
     STAX        (HL+)
 
-; Combine this value with the existing input line bitmask read from DE, and
-; group[2] = All active lines?
     LDEAX       (HL)
     ORA         A,D
     STAX        (HL+)
 
-; group[3] = Existing value combined with new input?
     DMOV        DE,EA
     ORA         A,E
     STAX        (HL+)
 
-; group[4] = Existing value combined with new input?
     LDEAX       (HL)
     ORA         A,D
     STAX        (HL+)
 
-; group[5] = Changed input?
     DMOV        DE,EA
     XRA         A,E
     STAX        (HL+)
@@ -10058,14 +10049,14 @@ LAB_46f1:
 
 _advance_loop_471b:
     INR         C
-    LTI         C,10h
+    LTI         C,16
     RET
 
-    JRE         _scan_switch_group_46db
+    JRE         _scan_switch_group_loop_46db
 
-LAB_4722:
+_scan_kc16_4722:
     ANI         PB,11110000b
-    JRE         LAB_46f1
+    JRE         _validate_switch_read_46f1
 
 _skip_to_next_group_4727:
     INX         HL
