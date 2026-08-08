@@ -16,12 +16,14 @@ tone_mix_UNKNOWN_8005:                                          EQU 8005h
 tone_mix_UNKNOWN_8006:                                          EQU 8006h
 patch_index_tone_mix_8007:                                      EQU 8007h
 patch_index_compare_8008:                                       EQU 8008h
-keyboard_UNKNOWN_8010:                                          EQU 8010h
-keyboard_UNKNOWN_8011:                                          EQU 8011h
+keyboard_input_group_first_changed_8010:                        EQU 8010h
+keyboard_input_group_last_changed_8011:                         EQU 8011h
 ; The currently active input matrix line. e.g. KC1-16 in the service manual.
 ; Set to 0xFF when no input line is active.
-input_active_line_8012:                                         EQU 8012h
-UNKNOWN_keyboard_flags_8013:                                    EQU 8013h
+keyboard_input_active_line_8012:                                EQU 8012h
+; Flags whether any keyboard input group has been found to hae been updated
+; during the keyboard scanning routine.
+keyboard_input_groups_updated_8013:                             EQU 8013h
 ; Set to 0x80 when MIDI note on.
 ; Set to 0 when keyboard note on.
 current_note_event_origin_8015:                                 EQU 8015h
@@ -164,7 +166,7 @@ FLAGS_80C9_PITCH_BEND_ACTIVE:                                   EQU 80h
 UNKNOWN_flags_80c9:                                             EQU 80c9h
 upd933_data_master_tune_80ca:                                   EQU 80cah
 pitch_bend_input_80cc:                                          EQU 80cch
-portamento_freq_increment_80cd:                              EQU 80cdh
+portamento_freq_increment_80cd:                                 EQU 80cdh
 UNKNOWN_pitch_bend_word_80cf:                                   EQU 80cfh
 UNKNOWN_pointer_to_patch_data_80d1:                             EQU 80d1h
 MAYBE_voice_number_80d3:                                        EQU 80d3h
@@ -201,13 +203,16 @@ channel_info_0_8100:                                            EQU 8100h
 channel_info_1_810b:                                            EQU 810bh
 channel_info_2_8116:                                            EQU 8116h
 channel_info_3_8121:                                            EQU 8121h
-keyboard_key_states_UNKNOWN_8130:                               EQU 8130h
+; An array of 9 entries, each 6 bytes long, that stores the current state of
+; each keyboard input group.
+; group[0-4]: A sliding window of the keygroup's input state. group[0] being
+; the current state, and group[4] being the oldest. Each time the group is
+; scanned, the window is moved by one index.
+; group[5]: Bitmask of which keys input state has changed.
+keyboard_key_states_8130:                                       EQU 8130h
 switch_states_8134:                                             EQU 8134h
-keyboard_key_states_UNKNOWN_8135:                               EQU 8135h
 input_group_kc9_lines_2_6_8164:                                 EQU 8164h
 input_group_kc10_8166:                                          EQU 8166h
-; @TODO: Why is this referenced, as opposed to the start of the array?
-input_group_kc10_UNKNOWN_816a:                                  EQU 816ah
 input_group_kc13_8178:                                          EQU 8178h
 input_group_kc16_818a:                                          EQU 818ah
 
@@ -8846,7 +8851,7 @@ clear_voice_note_numbers_419a:
 ; =============================================================================
 keyboard_clear_state_UNKNOWN_41a1:
     MVI         C,53
-    LXI         DE,keyboard_key_states_UNKNOWN_8130
+    LXI         DE,keyboard_key_states_8130
     CALL        clear_memory_block_4144
     RET
 
@@ -8985,8 +8990,8 @@ LAB_422a:
     ANI         A,1
     ORAX        (HL)
     STAX        (HL)
-    MVIW        (V_OFFSET(keyboard_UNKNOWN_8010)),0
-    MVIW        (V_OFFSET(keyboard_UNKNOWN_8011)),08h
+    MVIW        (V_OFFSET(keyboard_input_group_first_changed_8010)),0
+    MVIW        (V_OFFSET(keyboard_input_group_last_changed_8011)),08h
     RET
 
 _cartridge_insert_check_inserted_4248:
@@ -9327,7 +9332,7 @@ UNKNOWN_clears_blocks_of_memory_43a1:
 
 ; =============================================================================
 clears_memory_43d8:
-    LXI         DE,keyboard_UNKNOWN_8010
+    LXI         DE,keyboard_input_group_first_changed_8010
     MVI         C,0EFh
     CALL        clear_memory_block_4144
     MVI         A,010h
@@ -9470,14 +9475,14 @@ LAB_4498:
 
 ; =============================================================================
 main_44a7:
-    CALL        input_scan_keyboard_MAYBE_4670
-    EQIW        (V_OFFSET(keyboard_UNKNOWN_8010)),0FFh
+    CALL        keyboard_scan_keys_4670
+    EQIW        (V_OFFSET(keyboard_input_group_first_changed_8010)),0FFh
     CALL        keyboard_handle_active_keys_472e
     CALL        input_scan_switches_MAYBE_46cd
 
 ; Check if any input lines are active. If so, handle the button event.
 ; If no lines are active, it will be 0xFF.
-    EQIW        (V_OFFSET(input_active_line_8012)),0FFh
+    EQIW        (V_OFFSET(keyboard_input_active_line_8012)),0FFh
     CALL        input_handle_button_events_4ac6
 
     CALL        main_check_midi_channel_override_45fd
@@ -9850,22 +9855,30 @@ _compare_bytes_loop_4668:
     RET
 
 ; =============================================================================
-input_scan_keyboard_MAYBE_4670:
-    MVIW        (V_OFFSET(keyboard_UNKNOWN_8010)),0FFh
+; Scans the 9 input lines (KC0-KC8) of the musical keyboard matrix, and saves
+; the output of each line into the keyboard_key_states_8130 array.
+; The firmware maintains a sliding window of 6 consecutive readings for each
+; input line to debounce the input state.
+; Note events are handled in the keyboard_handle_active_keys_472e procedure.
+; =============================================================================
+keyboard_scan_keys_4670:
+    MVIW        (V_OFFSET(keyboard_input_group_first_changed_8010)),0FFh
     MVI         C,0
-    MVIW        (V_OFFSET(UNKNOWN_keyboard_flags_8013)),0
-    LXI         HL,keyboard_key_states_UNKNOWN_8130
+    MVIW        (V_OFFSET(keyboard_input_groups_updated_8013)),0
+    LXI         HL,keyboard_key_states_8130
+
+; Select KC0. PB bits 3-0 select the matrix line.
     ANI         PB,11110000b
 
 _scan_key_group_loop_467e:
-; Looks like it reads 3 times, and then
-; checks all reads are identical.
+; Read the matrix line 3 times, then check that all 3 reads are identical.
     DI
     MOV         B,(keyboard_switch_matrix_b800)
     MOV         A,(keyboard_switch_matrix_b800)
     MOV         D,(keyboard_switch_matrix_b800)
     EI
 
+; Advance PB to the next matrix line.
     ADI         PB,1
 
 ; Is A == B?
@@ -9878,43 +9891,64 @@ _scan_key_group_loop_467e:
     EQA         A,D
     JRE         _skip_to_next_group_46c6
 
-; Load the previous state of this key block?
-    LDEAX       (HL)
+; The following code builds a small 6-byte history for this group, combining
+; the current scan's 6 bytes with the previous scan's 6 data, so a keypress
+; persists across a few scan passes.
+; This avoids a keypress being missed by the consumer if it's pressed and
+; released between polls.
+;   group[0] = the current scan, inverted to active-high (1 = key pressed).
+;   group[1] = group[0] OR (old)group[0]
+;   group[2] = group[1] OR (old)group[1]
+;   group[3] = group[2] OR (old)group[2]
+;   group[4] = group[3] OR (old)group[3]
+;   group[5] = group[4] XOR (old)group[4] (flags whether the window changed)
+    LDEAX       (HL)                       ; EA = (old)group[0]:group[1].
     DMOV        DE,EA
 
-; The state where no keys are pressed is 0FFh.
-; XOR with 0FFh will show if the state has changed.
+; group[0] = this reading, inverted to active-high (no keys pressed = 0FFh).
     XRI         A,0FFh
-
-; Store the changed state in group[0], and increment.
     STAX        (HL+)
 
-; Combine with previous state?
-; Store in group[1], and increment.
+; group[1] = group[0] | (old)group[0].
     ORA         A,E
     STAX        (HL+)
 
-    LDEAX       (HL)
+; group[2] = group[1] | (old)group[1].
+    LDEAX       (HL)                       ; EA = (old)group[2]:(old)group[3].
     ORA         A,D
     STAX        (HL+)
 
+; group[3] = group[2] | (old)group[2].
     DMOV        DE,EA
     ORA         A,E
     STAX        (HL+)
-    LDEAX       (HL)
+
+; group[4] = group[3] | (old)group[3].
+    LDEAX       (HL)                       ; EA = (old)group[4]:(old)group[5].
     ORA         A,D
     STAX        (HL+)
+
+; group[5] = group[4] ^ (old)group[4]. HL is now the next group's base (+6).
     DMOV        DE,EA
     XRA         A,E
     STAX        (HL+)
+
+; If any of bits 0-5 of group[5] (the diff) are set, this group's activity
+; window changed since the last scan: Fall through and record it below.
+; Otherwise, advance the loop.
     ONI         A,00111111b
     JR          _advance_loop_46bf
 
+; A changed group was found.
     MOV         A,C
-    BIT         0,(V_OFFSET(UNKNOWN_keyboard_flags_8013))
-    STAW        (V_OFFSET(keyboard_UNKNOWN_8010))
-    STAW        (V_OFFSET(keyboard_UNKNOWN_8011))
-    ORIW        (V_OFFSET(UNKNOWN_keyboard_flags_8013)),1
+; Test whether this is the first changed group found this pass.
+; If so, record it in keyboard_input_group_first_changed_8010. Otherwise skip.
+    BIT         0,(V_OFFSET(keyboard_input_groups_updated_8013))
+    STAW        (V_OFFSET(keyboard_input_group_first_changed_8010))
+; Update the latest group found to have changed this pass, and set the
+; keyboard 'updated' flag.
+    STAW        (V_OFFSET(keyboard_input_group_last_changed_8011))
+    ORIW        (V_OFFSET(keyboard_input_groups_updated_8013)),1
 
 _advance_loop_46bf:
     INR         C
@@ -9923,6 +9957,7 @@ _advance_loop_46bf:
 
     JRE         _scan_key_group_loop_467e
 
+; If the keygroup scan was unstable, skip the group.
 _skip_to_next_group_46c6:
     INX         HL
     INX         HL
@@ -9934,7 +9969,7 @@ _skip_to_next_group_46c6:
 
 ; =============================================================================
 input_scan_switches_MAYBE_46cd:
-    MVIW        (V_OFFSET(input_active_line_8012)),0FFh
+    MVIW        (V_OFFSET(keyboard_input_active_line_8012)),0FFh
 
 ; The front-panel buttons start at input matrix group 9.
     MVI         C,9
@@ -10007,7 +10042,7 @@ LAB_46f1:
     JR          _advance_loop_471b
 
     MOV         A,C
-    STAW        (V_OFFSET(input_active_line_8012))
+    STAW        (V_OFFSET(keyboard_input_active_line_8012))
     RET
 
 _advance_loop_471b:
@@ -10034,28 +10069,36 @@ _skip_to_next_group_4727:
 keyboard_handle_active_keys_472e:
     MVIW        (V_OFFSET(input_received_ignore_apo_flag_8042)),1
 
-; C = 08011h - 08010h.
-    LDAW        (V_OFFSET(keyboard_UNKNOWN_8011))
+; Compute the span of keyboard groups to process.
+; C = number of groups to test = last changed group - first changed group.
+    LDAW        (V_OFFSET(keyboard_input_group_last_changed_8011))
     MOV         C,A
-    LDAW        (V_OFFSET(keyboard_UNKNOWN_8010))
+    LDAW        (V_OFFSET(keyboard_input_group_first_changed_8010))
     SUB         C,A
 
-; B = A * 6.
+; B = (first changed group index) * 6: Byte offset into the input buffer.
     MOV         B,A
     ADD         B,A
     ADD         B,A
     SLL         B
 
-; EA = 8135[B].
-    LXI         EA,keyboard_key_states_UNKNOWN_8135
+; EA = pointer to the first changed keyboard group's group[5] (changed state).
+; Point at byte 5 of the first group in the keyboard_key_states_8130 array,
+; and add the offset of the first changed group (in B) to it.
+    LXI         EA,keyboard_key_states_8130 + 5
     EADD        EA,B
+
+; B = base note number for this group, looked up by group index (A still
+; holds that index from the SUB above).
     LXI         HL,keyboard_test_note_offsets_475d
     LDAX        (HL+A)
     MOV         B,A
+
     DMOV        HL,EA
-    JR          _MAYBE_test_key_group_4751
+    JR          _test_key_group_4751
 
-_MAYBE_advance_to_next_key_group_474b:
+_advance_to_next_key_group_474b:
+; Advance to the next group[5] (6 bytes per group).
     INX         HL
     INX         HL
     INX         HL
@@ -10063,20 +10106,24 @@ _MAYBE_advance_to_next_key_group_474b:
     INX         HL
     INX         HL
 
-_MAYBE_test_key_group_4751:
+_test_key_group_4751:
     LDAX        (HL)
 
-; If no keys are active, skip.
+; Test the fifth byte of the group to determine whether any of the keyboard
+; input group's keys changed.
+; If none of this group's 6 keys changed state this pass (group[5] == 0), skip.
     OFFI        A,00111111b                         ; Skip if (A & byte = 0)
     CALL        keyboard_test_keygroup_4766
 
-; Add 6 to the note number.
+; Advance the base note number by 6 keys, and move to the next group, until
+; every group in the changed span has been tested.
     ADI         B,06h
     DCR         C
-    JR          _MAYBE_advance_to_next_key_group_474b
+    JR          _advance_to_next_key_group_474b
 
     RET
 
+; Base note number for each of the 9 matrix groups (KC0-KC8).
 keyboard_test_note_offsets_475d:
     DB          024h
     DB          02Ah
@@ -10089,58 +10136,64 @@ keyboard_test_note_offsets_475d:
     DB          054h
 
 ; =============================================================================
-; Tests a keygroup.
-; This is only called when at least one key is active.
-; Calls the note handler for the active keys.
-; A: Key bitmask.
-; B: Current note number being tested.
+; Tests each of the (up to) 6 keys in a keygroup against the group's byte 5
+; edge-change bitmask, and calls the note handler for every key that changed.
+; A: group[5]: Bitmask of which keys in this group changed state this pass.
+; B: Base note number for this group (see keyboard_test_note_offsets_475d).
 ; =============================================================================
 keyboard_test_keygroup_4766:
     PUSH        BC
 
-; Gets the key number within the group.
-; Shifts the key bitmask left,
-; until it correctly masks the keyboard scan bitmask.
-; Adding 1 to the note number with each iteration.
+; C = bitmask for the key currently being tested within the group (bit 0-5).
     MVI         C,1
 
-; If the note bitmask in C matches A, call the handler.
+; If this key's bit is set in the changed bitmask (A), handle its event.
 ; Otherwise skip.
 _get_note_number_loop_4769:
     OFFA        A,C
     CALL        keyboard_handle_note_event_4779
 
-; Add 1 to the note number, and shift the test bitmask.
+; Add 1 to the note number, and shift the test bitmask to the next key.
     ADI         B,1
     SLL         C
 
-; Skip once the shift goes past the block of 6 keys.
-    ONI         C,11000000b ; Skip if A & ? != 0.
+; Skip once the shift goes past the block of 6 keys (bits 6-7 of C set).
+    ONI         C,11000000b ; Skip if (C & byte) != 0.
     JR          _get_note_number_loop_4769
 
     POP         BC
     RET
 
 ; =============================================================================
-; B: Note#.
-; HL: ?
+; Handles a single key's press/release event.
+; B: Note number for this key.
+; C: This key's bit within the group (1,2,4,8,16,32).
+; HL: group[5] of the key's keyboard group (edge-change bitmask).
 ; =============================================================================
 keyboard_handle_note_event_4779:
     PUSH        V
     PUSH        BC
     PUSH        HL
+; HL now points at group[4]: the group's 5-scan debounced "key currently
+; active" level (see keyboard_scan_keys_4670), as opposed to group[5]
+; (the edge flag that got us here), which only says something changed.
     DCX         HL
     MOV         A,B
     MOV         E,A
+
+; A = group[4]. Bounds-check the note number.
     LDAX        (HL)
     LTI         E,55h
     JR          _exit_4799
 
+; If this key's bit is set in group[4], it's currently pressed (within the
+; debounce window): tag the event as NOTE ON. Otherwise leave E as a NOTE
+; OFF and fall through.
     OFFA        A,C
     ORI         E,KEYBOARD_NOTE_ON
     CALL        midi_send_key_event_363f
 
-; Exit if local mode is enabled.
+; If Local Control (MIDI CC 122 == 0) is disabled, skip note on/off handling.
     OFFIW       (V_OFFSET(local_mode_keyboard_disabled_8016)),1      ; Skip if (A & byte == 0)
     JR          _exit_4799
 
@@ -11080,7 +11133,7 @@ input_handle_button_events_4ac6:
 
 ; Mask the active input line, and subtract 9, because all front-panel buttons
 ; are wired to input lines 9-15.
-    LDAW        (V_OFFSET(input_active_line_8012))
+    LDAW        (V_OFFSET(keyboard_input_active_line_8012))
     ANI         A,1111b
     SUI         A,9
 
@@ -11093,7 +11146,7 @@ input_handle_button_events_4ac6:
     PUSH        BC
     SLL         B
 
-    LXI         HL,input_group_kc10_UNKNOWN_816a
+    LXI         HL,input_group_kc10_8166 + 4
     LDEAX       (HL+B)
     POP         BC
 
