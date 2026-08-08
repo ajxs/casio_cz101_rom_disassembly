@@ -205,12 +205,19 @@ channel_info_2_8116:                                            EQU 8116h
 channel_info_3_8121:                                            EQU 8121h
 ; An array of 9 entries, each 6 bytes long, that stores the current state of
 ; each keyboard input group.
-; group[0-4]: A sliding window of the keygroup's input state. group[0] being
-; the current state, and group[4] being the oldest. Each time the group is
-; scanned, the window is moved by one index.
+; group[0-4]: A sliding window of the keygroup's input state.
+; group[0] is the most recent scan. Each subsequent entry is older, and
+; logically OR'd with the previous state. The result is that group[4] is the
+; 'oldest', and represents the 'current state' of this key group.
+; The idea being that the key state is 'averaged' over the last 5 scans, so
+; that if a key is pressed for a period too short for the handler to register,
+; it will still be acted upon.
 ; group[5]: Bitmask of which keys input state has changed.
 keyboard_key_states_8130:                                       EQU 8130h
-switch_states_8134:                                             EQU 8134h
+; group[4] from the above array, which is the 'current state' of the keyboard
+; input groups.
+keyboard_key_states_current_8134:                               EQU 8134h
+keyboard_key_states_changed_flag_8135:                          EQU 8135h
 input_group_kc9_lines_2_6_8164:                                 EQU 8164h
 input_group_kc10_8166:                                          EQU 8166h
 input_group_kc13_8178:                                          EQU 8178h
@@ -8911,7 +8918,7 @@ copies_8_bytes_0FF00_41d1h:
 ; =============================================================================
 UNKNOWN_patch_load_41d8:
     PUSH        HL
-    CALL        UNKNOWN_copies_1_byte_to_next_in_loop_4225
+    CALL        keyboard_set_all_notes_off_4225
     CALL        keyboard_handle_active_keys_472e
     CALL        clear_voice_note_numbers_419a
     CALL        FUN_7354
@@ -8936,7 +8943,7 @@ UNKNOWN_solo_mode_patch_load_41f5:
     DEQ         EA,HL
     JR          LAB_4208
 
-    CALL        UNKNOWN_copies_1_byte_to_next_in_loop_4225
+    CALL        keyboard_set_all_notes_off_4225
     CALL        keyboard_handle_active_keys_472e
     CALL        keyboard_clear_state_UNKNOWN_41a1
 
@@ -8962,25 +8969,29 @@ LAB_4208:
     RET
 
 ; =============================================================================
-UNKNOWN_copies_1_byte_to_next_in_loop_4225:
-    LXI         HL,switch_states_8134
+; Triggers all notes off by triggering key events for all key input groups.
+; This works by setting the 'changed' flag for all key input groups, and
+; clearing the key states for all keys.
+; =============================================================================
+keyboard_set_all_notes_off_4225:
+    LXI         HL,keyboard_key_states_current_8134
     MVI         C,7
 
-LAB_422a:
-; Copies *(HL) to *(HL+1)
+_set_keygroups_off_loop_422a:
+; Copies group[4] to group[5], to set the 'changed' flag for the group.
     LDAX        (HL+)
     STAX        (HL-)
-; Clear *(HL)
+; Clear group[4] to set all keys as 'off'.
     MVI         A,0
     STAX        (HL+)
-; HL = HL + 5
+; Increment HL by 5 to move to the next group.
     INX         HL
     INX         HL
     INX         HL
     INX         HL
     INX         HL
     DCR         C
-    JR          LAB_422a
+    JR          _set_keygroups_off_loop_422a
 
     LDAX        (HL)
     PUSH        V
@@ -8991,7 +9002,7 @@ LAB_422a:
     ORAX        (HL)
     STAX        (HL)
     MVIW        (V_OFFSET(keyboard_input_group_first_changed_8010)),0
-    MVIW        (V_OFFSET(keyboard_input_group_last_changed_8011)),08h
+    MVIW        (V_OFFSET(keyboard_input_group_last_changed_8011)),8
     RET
 
 _cartridge_insert_check_inserted_4248:
@@ -9703,7 +9714,7 @@ main_apo_check_test_switch_group_45a2:
 ; Skips on return if no activity detected.
 ; =============================================================================
 main_apo_check_for_input_45ad:
-    LXI         HL,switch_states_8134
+    LXI         HL,keyboard_key_states_current_8134
     MVI         C,7
     MVI         A,00111111b
     CALL        main_apo_check_test_switch_group_45a2
@@ -10085,7 +10096,7 @@ keyboard_handle_active_keys_472e:
 ; EA = pointer to the first changed keyboard group's group[5] (changed state).
 ; Point at byte 5 of the first group in the keyboard_key_states_8130 array,
 ; and add the offset of the first changed group (in B) to it.
-    LXI         EA,keyboard_key_states_8130 + 5
+    LXI         EA,keyboard_key_states_changed_flag_8135
     EADD        EA,B
 
 ; B = base note number for this group, looked up by group index (A still
@@ -12499,7 +12510,8 @@ button_check_apo_5021:
 ; =============================================================================
 button_check_midi_channel_override_5024:
     LXI         HL,0F80h
-    LXI         EA,switch_states_8134
+; Load the current state of the specified input matrix group (KC0-15).
+    LXI         EA,keyboard_key_states_8130 + 4
 
 ; A = H * 3 * 2.
     MOV         A,H
