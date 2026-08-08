@@ -1655,8 +1655,8 @@ ui_get_table_index_from_active_screen_2071:
     RET
 
 ; =============================================================================
-MAYBE_main_button_hold_check_207a:
-; Test if the a button has reached its hold-repeat threshold.
+main_button_hold_check_207a:
+; Test if a button has reached its hold-repeat threshold.
     ONIW        (V_OFFSET(ui_flags_8037)),FLAGS_8037_BUTTON_HELD
     RET
 
@@ -1715,7 +1715,7 @@ _button_held_jumpoff_2099:
     DW          return_4c35
     DW          MAYBE_input_up_down_held_tone_mix_260e
     DW          input_up_down_held_midi_solo_mode_2624
-    DW          input_up_down_held_midi_2619             ; 0x18
+    DW          input_up_down_held_midi_2619                   ; 0x18
     DW          return_4c35
     DW          return_4c35
     DW          return_4c35
@@ -9509,7 +9509,7 @@ main_44a7:
     GTIW        (V_OFFSET(UNKNOWN_counter_806b)),4
     RET
 
-    CALL        MAYBE_main_button_hold_check_207a
+    CALL        main_button_hold_check_207a
     MVIW        (V_OFFSET(UNKNOWN_counter_806b)),0
     RET
 
