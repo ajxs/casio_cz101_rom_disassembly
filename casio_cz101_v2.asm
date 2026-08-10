@@ -10472,19 +10472,20 @@ note_off_tone_mix_multiple_voices_4872:
 
 ; =============================================================================
 note_on_basic_porta_4881:
-    CALL        note_on_basic_porta_on_find_voice_492e ; Skips on return if successful.
+; Skips on return if successful.
+    CALL        note_on_basic_porta_on_find_voice_492e
     JR          note_on_basic_porta_no_free_voices_488c
 
 ; =============================================================================
-note_on_basic_porta_on_4885:
+note_on_basic_porta_found_voice_4885:
     CALL        note_on_save_channel_info_49ff
-    CALL        note_on_trigger_voice_MAYBE_4a7f
+    CALL        note_on_trigger_voice_porta_MAYBE_4a7f
     RET
 
 ; =============================================================================
 note_on_basic_porta_no_free_voices_488c:
     CALL        advance_voice_number_in_d_4977
-    JR          note_on_basic_porta_on_4885
+    JR          note_on_basic_porta_found_voice_4885
 
 ; =============================================================================
 note_off_basic_porta_on_4890:
@@ -10557,6 +10558,8 @@ note_off_solo_mode_multiple_voices_48c5:
 
     JR          note_on_solo_mode_48b4
 
+; =============================================================================
+; HL: Channel Info (0x8100).
 ; =============================================================================
 note_on_solo_mode_porta_48cf:
     JR          note_on_solo_mode_48b4
@@ -11118,14 +11121,16 @@ note_on_trigger_voice_MAYBE_4a6e:
 
 ; =============================================================================
 ; Same as the above, but calls a different upd933 function?
+; Called when porta on?
+; HL: Channel Info (0x8100)
 ; =============================================================================
-note_on_trigger_voice_MAYBE_4a7f:
+note_on_trigger_voice_porta_MAYBE_4a7f:
     PUSH        HL
     PUSH        DE
     CALL        note_on_get_upd933_pitch_MAYBE_4aba
     CALL        note_on_off_remap_voice_number_UNKNOWN_4a63
     CALL        note_on_setup_channel_if_first_note_4a9e
-    CALL        upd933_note_on_UNKNOWN_6ece
+    CALL        upd933_note_on_porta_UNKNOWN_6ece
     POP         DE
     POP         HL
     RET
@@ -15027,16 +15032,16 @@ upd933_data_UNKNOWN_6ecb:
     DB          80h
 
 ; =============================================================================
-; HL: ?
+; HL: Channel Info (0x8100).
 ; D: Voice #?
 ; E:?
 ; =============================================================================
-upd933_note_on_UNKNOWN_6ece:
+upd933_note_on_porta_UNKNOWN_6ece:
     MVI         A,0
 ; Falls-through below.
 
 ; =============================================================================
-; HL: ?
+; HL: Channel Info (0x8100)
 ; D: Voice #?
 ; E:?
 ; =============================================================================
@@ -15061,17 +15066,19 @@ upd933_note_on_UNKNOWN_6ed0:
     OFFIW       (V_OFFSET(MAYBE_voice_number_80d3)),1
     JRE         LAB_6f19
 
-    LDAX        (HL+15h)
-    ONI         A,80h
+; By this point HL = 0x8640.
+    LDAX        (HL+VOICE_INFO_8640_15_FLAGS_UNKNOWN)
+    ONI         A,VOICE_INFO_8640_15_80
     JR          LAB_6f00
 
     PUSH        HL
     CALL        return_pointer_to_voice_ptr_in_hl_plus_1_7d05
     CALL        upd933_UNKNOWN_6f22
     POP         HL
+
 LAB_6f00:
-    LDAX        (HL+15h)
-    ONI         A,2
+    LDAX        (HL+VOICE_INFO_8640_15_FLAGS_UNKNOWN)
+    ONI         A,VOICE_INFO_8640_15_TONE_MIX
     JR          LAB_6f19
 
     PUSH        HL
@@ -15097,35 +15104,35 @@ LAB_6f19:
 
 ; =============================================================================
 upd933_UNKNOWN_6f22:
-    LDAX        (HL+13h)
-    ANI         A,01111111b
-    STAX        (HL+13h)
-    OFFI        A,1
+    LDAX        (HL+VOICE_INFO_8640_13_FLAGS_UNKNOWN)
+    ANI         A,(~VOICE_INFO_8640_13_80 & 0FFh)
+    STAX        (HL+VOICE_INFO_8640_13_FLAGS_UNKNOWN)
+    OFFI        A,VOICE_INFO_8640_13_1
     JR          LAB_6f31
 
     LDAW        (V_OFFSET(data_80D6))
-    STAX        (HL+0dh)
+    STAX        (HL+VOICE_INFO_8640_d)
     JRE         LAB_6f5b
 
 LAB_6f31:
     PUSH        HL
     ORIW        (V_OFFSET(UNKNOWN_flags_80e5)),8
-    LDAX        (HL+13h)
+    LDAX        (HL+VOICE_INFO_8640_13_FLAGS_UNKNOWN)
     ORI         A,8
-    STAX        (HL+13h)
+    STAX        (HL+VOICE_INFO_8640_13_FLAGS_UNKNOWN)
     LDAW        (V_OFFSET(data_80D6))
-    STAX        (HL+9)
-    LDEAX       (HL+5)
+    STAX        (HL+VOICE_INFO_8640_9)
+    LDEAX       (HL+VOICE_INFO_8640_5_PTR_TO_PATCH_BFR_EDIT)
     MVI         B,014h
-    LDAX        (HL+15h)
-    OFFI        A,40h
+    LDAX        (HL+VOICE_INFO_8640_15_FLAGS_UNKNOWN)
+    OFFI        A,VOICE_INFO_8640_15_40
     MVI         B,04Dh
     EADD        EA,B
     DMOV        HL,EA
     LDAX        (HL)
     POP         HL
     PUSH        HL
-    STAX        (HL+17h)
+    STAX        (HL+VOICE_INFO_8640_17_DCA_ENV_CURRENT_STEP_MAYBE)
     DW 00AFh   ;    LDAX        (HL+00h)
     LXI         HL,upd933_data_UNKNOWN_6f5c
     CALL        upd933_send_register_and_data_at_hl_743b
@@ -15160,7 +15167,7 @@ upd933_UNKNOWN_6f5f:
 
     ORIW        (V_OFFSET(UNKNOWN_flags_80e5)),1
     PUSH        HL
-    LDEAX       (HL+1)
+    LDEAX       (HL+VOICE_INFO_8640_1_PTR_TO_OTHER_VOICE)
     DMOV        HL,EA
     SHLD        (UNKNOWN_pointer_to_voice_data_80db)
     CALL        voice_frequency_UNKNOWN_7068
