@@ -227,7 +227,8 @@ input_group_kc16_818a:                                          EQU 818ah
 ; Stores the note number for each voice. Bit 7 indicates whether the note is
 ; currently active.
 voice_note_numbers_8190:                                        EQU 8190h
-voice_unknown_8198:                                             EQU 8198h
+; Saves whether note originated from keyboard or MIDI.
+voice_note_origin_8198:                                         EQU 8198h
 UNUSED_data_81a0:                                               EQU 81a0h
 lcd_cursor_index_positions_81a2:                                EQU 81a2h
 lcd_print_number_indexes_81a9:                                  EQU 81a9h
@@ -461,16 +462,19 @@ CHANNEL_FLAGS_MODIFIED_MAYBE:                   EQU 1 << 7
 
 ; Channel info array 0x8100.
 CHANNEL_INFO_FLAGS:                             EQU 0
-CHANNEL_INFO_LAST_VOICE_NUMBER_MAYBE:           EQU 1
+; The 0x90-based voice number most recently assigned to this channel.
+CHANNEL_INFO_LAST_VOICE_NUMBER:                 EQU 1
 CHANNEL_INFO_NOTE_COUNT:                        EQU 2
-CHANNEL_INFO_3:                                 EQU 3
-CHANNEL_INFO_5:                                 EQU 5
-CHANNEL_INFO_7:                                 EQU 7
-CHANNEL_INFO_9:                                 EQU 9
+
+; 1 is the top of the stack.
+CHANNEL_INFO_ACTIVE_NOTE_STACK_1:               EQU 3
+CHANNEL_INFO_ACTIVE_NOTE_STACK_2:               EQU 5
+CHANNEL_INFO_ACTIVE_NOTE_STACK_3:               EQU 7
+CHANNEL_INFO_ACTIVE_NOTE_STACK_4:               EQU 9
 
 
 CHANNEL_INFO_FLAGS_80:                          EQU 1 << 7
-CHANNEL_INFO_FLAGS_8:                           EQU 1 << 3
+CHANNEL_INFO_FLAGS_NOTE_HELD:                   EQU 1 << 3
 CHANNEL_INFO_FLAGS_SOLO:                        EQU 1 << 2
 CHANNEL_INFO_FLAGS_PORTA:                       EQU 1 << 1
 CHANNEL_INFO_FLAGS_TONE_MIX:                    EQU 1 << 0
@@ -8928,7 +8932,7 @@ UNKNOWN_patch_load_41d8:
     CALL        delay_441e
 
     POP         BC
-    CALL        patch_call_function_per_channel_7793
+    CALL        UNKNOWN_channel_setup_7793
     CALL        keyboard_clear_state_UNKNOWN_41a1
     POP         HL
     RET
@@ -8964,7 +8968,7 @@ LAB_4208:
     POP         HL
     PUSH        HL
     CALL        channel_get_index_from_pointer_to_info_50c7
-    CALL        patch_called_per_channel_7776
+    CALL        UNKNOWN_called_per_channel_7776
     POP         HL
     RET
 
@@ -10263,17 +10267,13 @@ channel_get_info_table_ptr_47bb:
     JR          channel_get_info_table_ptr_for_index_in_a_47a1
 
 ; =============================================================================
-; Initiates handling of note on/off events.
-; E:  Note#.
-; HL: Channel info (0x8100).
+; E:  Note#
+; HL: Channel Info (0x8100)
 ; =============================================================================
 note_on_off_47be:
-; Does this MSB flag indicate NOTE ON/OFF?
-; MSB is set in NOTE ON.
-; MSB is cleared in NOTE OFF?
-    ONI         E,KEYBOARD_NOTE_ON              ; Skip if NOTE ON.
-    CALL        note_off_4800                   ; Skips on return.
-    CALL        note_on_47c8
+    ONI         E,KEYBOARD_NOTE_ON              ; Skip if NOTE ON (E & 80h != 0).
+    CALL        note_off_4800                   ; NOTE OFF path. Skips on return.
+    CALL        note_on_47c8                    ; NOTE ON path.
     RET
 
 ; =============================================================================
@@ -10281,50 +10281,55 @@ note_on_off_47be:
 ; HL: Channel info (0x8100).
 ; =============================================================================
 note_on_47c8:
-; Add 1 to the note count?
+; Channel now has one more note held (used for e.g. last-note-priority
+; decisions elsewhere; not clamped, unlike note_off_4800's decrement below).
     LDAX        (HL+CHANNEL_INFO_NOTE_COUNT)
     ADI         A,1
     STAX        (HL+CHANNEL_INFO_NOTE_COUNT)
 
     ORI         E,KEYBOARD_NOTE_ON
 
-    LDAX        (HL+CHANNEL_INFO_LAST_VOICE_NUMBER_MAYBE)
+; D = this channel's last-used voice number (0x90-0x97) -- the starting
+; point for voice allocation/portamento continuation below.
+    LDAX        (HL+CHANNEL_INFO_LAST_VOICE_NUMBER)
     MOV         D,A
 
     LDAX        (HL+CHANNEL_INFO_FLAGS)
     SLL         A
 
-    CALL        note_on_jumpoff_47db
+    CALL        note_on_dispatch_47db
     RET
 
 ; =============================================================================
+; 16-way dispatch on CHANNEL_INFO_FLAGS's low nibble, selecting the voice
+; allocation strategy for a NOTE ON on this channel.
 ; A:  Channel flags shifted.
 ; D:  Voice#.
 ; E:  Note# & 0x80.
 ; HL: Channel Info (0x8100).
 ; =============================================================================
-note_on_jumpoff_47db:
+note_on_dispatch_47db:
 ; Mask the shifted channel flags to clamp it to 0-30.
 ; This will serve as an index into the table of 16 pointers below.
     ANI         A,00011110b
     TABLE
     JB
-    DW          note_on_basic_mode_483a
-    DW          note_on_tone_mix_MAYBE_4859
-    DW          note_on_basic_porta_on_4881
-    DW          UNKNOWN_note_on_sub_solo_mode_4894
-    DW          UNKNOWN_note_on_solo_mode_porta_on_48b4
-    DW          UNKNOWN_note_on_solo_mode_porta_on_48b4
-    DW          UNKNOWN_note_on_solo_mode_porta_on_48cf
-    DW          UNKNOWN_note_on_solo_mode_porta_on_48cf
-    DW          MAYBE_note_on_basic_mode_note_not_found_4842
-    DW          UNKNOWN_note_on_sub_4868
-    DW          UNKNOWN_note_on_basic_porta_on_488c
-    DW          UNKNOWN_note_on_solo_mode_porta_on_multiple_voices_4896
-    DW          UNKNOWN_note_on_solo_mode_multiple_voices_48be
-    DW          UNKNOWN_note_on_solo_mode_multiple_voices_48be
-    DW          UNKNOWN_note_on_solo_mode_porta_on_multiple_voices_48be
-    DW          UNKNOWN_note_on_solo_mode_porta_on_multiple_voices_48be
+    DW          note_on_basic_mode_483a                            ; 0000: -
+    DW          note_on_tone_mix_4859                              ; 0001: TONE_MIX
+    DW          note_on_basic_porta_4881                           ; 0010: PORTA
+    DW          note_on_tone_mix_porta_4894                        ; 0011: PORTA+TONE_MIX
+    DW          note_on_solo_mode_48b4                             ; 0100: SOLO
+    DW          note_on_solo_mode_48b4                             ; 0101: SOLO+TONE_MIX
+    DW          note_on_solo_mode_porta_48cf                       ; 0110: SOLO+PORTA
+    DW          note_on_solo_mode_porta_48cf                       ; 0111: SOLO+PORTA+TONE_MIX
+    DW          note_on_basic_mode_steal_voice_4842                ; 1000: NOTE_HELD
+    DW          note_on_tone_mix_multiple_voices_4868              ; 1001: NOTE_HELD+TONE_MIX
+    DW          note_on_basic_porta_no_free_voices_488c            ; 1010: NOTE_HELD+PORTA
+    DW          note_on_solo_mode_porta_on_multiple_voices_4896    ; 1011: NOTE_HELD+PORTA+TONE_MIX
+    DW          note_on_solo_mode_multiple_voices_48be             ; 1100: NOTE_HELD+SOLO
+    DW          note_on_solo_mode_multiple_voices_48be             ; 1101: NOTE_HELD+SOLO+TONE_MIX
+    DW          note_on_solo_mode_porta_multiple_voices_48be       ; 1110: NOTE_HELD+SOLO+PORTA
+    DW          note_on_solo_mode_porta_multiple_voices_48be       ; 1111: NOTE_HELD+SOLO+PORTA+TONE_MIX
 
 ; =============================================================================
 note_off_4800:
@@ -10336,40 +10341,44 @@ note_off_4800:
 
 ; Reset note on/off flag.
     ANI         E,(~KEYBOARD_NOTE_ON & 0FFh)
-    LDAX        (HL+CHANNEL_INFO_LAST_VOICE_NUMBER_MAYBE)
+    LDAX        (HL+CHANNEL_INFO_LAST_VOICE_NUMBER)
     MOV         D,A
     LDAX        (HL)
     SLL         A
 
-    CALL        note_off_jumpoff_4815
+    CALL        note_off_dispatch_4815
     RETS
 
 ; =============================================================================
+; 16-way dispatch on CHANNEL_INFO_FLAGS's low nibble, selecting the voice
+; allocation strategy for a NOTE ON on this channel.
 ; A:  Channel flags shifted.
 ; D:  Voice#.
 ; E:  Note# & 0x80.
 ; HL: Channel Info (0x8100).
 ; =============================================================================
-note_off_jumpoff_4815:
+note_off_dispatch_4815:
+; Mask the shifted channel flags to clamp it to 0-30.
+; This will serve as an index into the table of 16 pointers below.
     ANI         A,00011110b
     TABLE
     JB
-    DW          note_off_basic_mode_4849
-    DW          returns_4871
-    DW          note_off_basic_porta_on_4890
-    DW          returns_48a2
-    DW          returns_48c4
-    DW          returns_48c4
-    DW          returns_48d3
-    DW          returns_48d3
-    DW          UNKNOWN_note_off_sub_4858
-    DW          UNKNOWN_note_off_sub_4872
-    DW          UNKNOWN_note_off_sub_4892
-    DW          UNKNOWN_note_off_sub_48a3
-    DW          UNKNOWN_note_off_solo_mode_porta_on_48c5
-    DW          UNKNOWN_note_off_solo_mode_porta_on_48c5
-    DW          UNKNOWN_note_off_sub_48d4
-    DW          UNKNOWN_note_off_sub_48d4
+    DW          note_off_basic_mode_4849                         ; 0000: -
+    DW          returns_4871                                     ; 0001: TONE_MIX (no-op)
+    DW          note_off_basic_porta_on_4890                     ; 0010: PORTA
+    DW          returns_48a2                                     ; 0011: PORTA+TONE_MIX (no-op)
+    DW          returns_48c4                                     ; 0100: SOLO (no-op)
+    DW          returns_48c4                                     ; 0101: SOLO+TONE_MIX (no-op)
+    DW          returns_48d3                                     ; 0110: SOLO+PORTA (no-op)
+    DW          returns_48d3                                     ; 0111: SOLO+PORTA+TONE_MIX (no-op)
+    DW          note_off_multiple_voices_4858                    ; 1000: NOTE_HELD
+    DW          note_off_tone_mix_multiple_voices_4872           ; 1001: NOTE_HELD+TONE_MIX
+    DW          note_off_porta_multiple_voices_4892              ; 1010: NOTE_HELD+PORTA
+    DW          note_off_tone_mix_porta_multiple_voices_48a3     ; 1011: NOTE_HELD+PORTA+TONE_MIX
+    DW          note_off_solo_mode_multiple_voices_48c5          ; 1100: NOTE_HELD+SOLO
+    DW          note_off_solo_mode_multiple_voices_48c5          ; 1101: NOTE_HELD+SOLO+TONE_MIX
+    DW          note_off_solo_mode_porta_multiple_voices_48d4    ; 1110: NOTE_HELD+SOLO+PORTA
+    DW          note_off_solo_mode_porta_multiple_voices_48d4    ; 1111: NOTE_HELD+SOLO+PORTA+TONE_MIX
 
 ; =============================================================================
 ; A:  Channel flags shifted.
@@ -10379,39 +10388,41 @@ note_off_jumpoff_4815:
 ; =============================================================================
 note_on_basic_mode_483a:
     CALL        note_on_basic_mode_find_voice_48d6
-    JR          MAYBE_note_on_basic_mode_note_not_found_4842
+    JR          note_on_basic_mode_steal_voice_4842
 
     CALL        note_on_basic_mode_voice_found_49f8
     RET
 
 ; =============================================================================
+; Called when unable to find a free voice. Advances the current voice number,
+; and steals the next voice in a round-robin allocation.
 ; HL: Channel Info.
 ; =============================================================================
-MAYBE_note_on_basic_mode_note_not_found_4842:
-    CALL        MAYBE_increment_voice_number_in_d_4977
+note_on_basic_mode_steal_voice_4842:
+    CALL        advance_voice_number_in_d_4977
     CALL        note_on_basic_mode_voice_found_49f8
     RET
 
 ; =============================================================================
 note_off_basic_mode_4849:
 ; Find voice with note. Skip if found.
-    CALL        find_active_voice_with_note_49ce
+    CALL        note_off_basic_mode_find_voice_with_note_49ce
     RET
-
+F
     CALL        note_off_UNKNOWN_4959
 ; Falls-through below.
 
 note_off_clear_flag_and_exit_UNKNOWN_4850:
-    CALL        note_off_clears_channel_flag_UNKNOWN_4954
+    CALL        note_off_clear_note_held_flag_4954
     RET
 
 ; =============================================================================
-FUN_4854:
-    CALL        FUN_4995
+note_off_remove_queued_note_4854:
+    CALL        channel_note_stack_find_and_pop_4995
     RET
 
 ; =============================================================================
-UNKNOWN_note_off_sub_4858:
+note_off_multiple_voices_4858:
     JR          note_off_basic_mode_4849
 
 ; =============================================================================
@@ -10420,7 +10431,7 @@ UNKNOWN_note_off_sub_4858:
 ; E:  Note# & 0x80.
 ; HL: Channel Info (0x8100).
 ; =============================================================================
-note_on_tone_mix_MAYBE_4859:
+note_on_tone_mix_4859:
 ; Add 4 to voice#.
 ; If this overflows 0x90-0x97, clamp at 0x90.
     ADI         D,04h
@@ -10428,7 +10439,7 @@ note_on_tone_mix_MAYBE_4859:
     MVI         D,090h
     CALL        note_on_basic_mode_voice_found_49f8
 ; D = Free Voice#.
-    CALL        note_on_sets_channel_flag_UNKNOWN_494f
+    CALL        note_on_set_note_held_flag_494f
     RET
 
 ; =============================================================================
@@ -10437,65 +10448,65 @@ note_on_tone_mix_MAYBE_4859:
 ; E:  Note# & 0x80.
 ; HL: Channel Info (0x8100).
 ; =============================================================================
-UNKNOWN_note_on_sub_4868:
+note_on_tone_mix_multiple_voices_4868:
     PUSH        DE
-    CALL        note_on_UNKNOWN_4a1a
+    CALL        note_on_push_new_note_to_channel_note_stack_4a1a
     CALL        note_off_UNKNOWN_4959
     POP         DE
-    JR          note_on_tone_mix_MAYBE_4859
+    JR          note_on_tone_mix_4859
 
 ; =============================================================================
 returns_4871:
     RET
 
 ; =============================================================================
-UNKNOWN_note_off_sub_4872:
-    CALL        UNKNOWN_note_off_sub_4960
-    JRE         FUN_4854
+note_off_tone_mix_multiple_voices_4872:
+    CALL        note_off_is_voice_d_holding_note_e_4960
+    JRE         note_off_remove_queued_note_4854
 
     CALL        note_off_UNKNOWN_4959
-    CALL        FUN_4986
+    CALL        channel_note_stack_pop_entry_1_if_active_4995
     JRE         note_off_clear_flag_and_exit_UNKNOWN_4850
 
-    JRE         note_on_tone_mix_MAYBE_4859
+    JRE         note_on_tone_mix_4859
 
 ; =============================================================================
-note_on_basic_porta_on_4881:
-    CALL        FUN_492e
-    JR          UNKNOWN_note_on_basic_porta_on_488c
+note_on_basic_porta_4881:
+    CALL        note_on_basic_porta_on_find_voice_492e ; Skips on return if successful.
+    JR          note_on_basic_porta_no_free_voices_488c
 
 ; =============================================================================
-UNKNOWN_note_on_basic_porta_on_4885:
-    CALL        note_on_UNKNOWN_49ff
-    CALL        FUN_4a7f
+note_on_basic_porta_on_4885:
+    CALL        note_on_save_channel_info_49ff
+    CALL        note_on_trigger_voice_MAYBE_4a7f
     RET
 
 ; =============================================================================
-UNKNOWN_note_on_basic_porta_on_488c:
-    CALL        MAYBE_increment_voice_number_in_d_4977
-    JR          UNKNOWN_note_on_basic_porta_on_4885
+note_on_basic_porta_no_free_voices_488c:
+    CALL        advance_voice_number_in_d_4977
+    JR          note_on_basic_porta_on_4885
 
 ; =============================================================================
 note_off_basic_porta_on_4890:
     JRE         note_off_basic_mode_4849
 
 ; =============================================================================
-UNKNOWN_note_off_sub_4892:
+note_off_porta_multiple_voices_4892:
     JRE         note_off_basic_mode_4849
 
 ; =============================================================================
-UNKNOWN_note_on_sub_solo_mode_4894:
-    JRE         note_on_tone_mix_MAYBE_4859
+note_on_tone_mix_porta_4894:
+    JRE         note_on_tone_mix_4859
 
 ; =============================================================================
-UNKNOWN_note_on_solo_mode_porta_on_multiple_voices_4896:
+note_on_solo_mode_porta_on_multiple_voices_4896:
     PUSH        DE
-    CALL        note_on_UNKNOWN_4a1a
+    CALL        note_on_push_new_note_to_channel_note_stack_4a1a
     POP         DE
 
-LAB_489b:
-    CALL        note_on_UNKNOWN_49ff
-    CALL        FUN_4a90
+note_on_UNKNOWN_489b:
+    CALL        note_on_save_channel_info_49ff
+    CALL        note_on_trigger_voice_glide_4a90
     RET
 
 ; =============================================================================
@@ -10503,68 +10514,70 @@ returns_48a2:
     RET
 
 ; =============================================================================
-UNKNOWN_note_off_sub_48a3:
-    CALL        UNKNOWN_note_off_sub_4960
-    JRE         FUN_4854
+note_off_tone_mix_porta_multiple_voices_48a3:
+    CALL        note_off_is_voice_d_holding_note_e_4960
+    JRE         note_off_remove_queued_note_4854
 
-    CALL        FUN_4986
-    JR          FUN_48ad
+    CALL        channel_note_stack_pop_entry_1_if_active_4995
+    JR          note_off_release_paired_voice_48ad
 
-    JR          LAB_489b
+    JR          note_on_UNKNOWN_489b
 
 ; =============================================================================
-FUN_48ad:
+note_off_release_paired_voice_48ad:
     CALL        note_off_UNKNOWN_4959
-    CALL        note_off_clears_channel_flag_UNKNOWN_4954
+    CALL        note_off_clear_note_held_flag_4954
     RET
 
 ; =============================================================================
-UNKNOWN_note_on_solo_mode_porta_on_48b4:
-    CALL        note_on_sets_channel_flag_UNKNOWN_494f
-    CALL        note_on_UNKNOWN_49ff
-    CALL        note_on_UNKNOWN_4a6e
+note_on_solo_mode_48b4:
+    CALL        note_on_set_note_held_flag_494f
+    CALL        note_on_save_channel_info_49ff
+    CALL        note_on_trigger_voice_MAYBE_4a6e
     RET
 
 ; =============================================================================
-UNKNOWN_note_on_solo_mode_multiple_voices_48be:
+note_on_solo_mode_multiple_voices_48be:
     PUSH        DE
-    CALL        note_on_UNKNOWN_4a1a
+    CALL        note_on_push_new_note_to_channel_note_stack_4a1a
     POP         DE
-    JR          UNKNOWN_note_on_solo_mode_porta_on_48b4
+    JR          note_on_solo_mode_48b4
 
 ; =============================================================================
 returns_48c4:
     RET
 
-UNKNOWN_note_off_solo_mode_porta_on_48c5:
-    CALL        UNKNOWN_note_off_sub_4960
-    JRE         FUN_4854
+; =============================================================================
+note_off_solo_mode_multiple_voices_48c5:
+    CALL        note_off_is_voice_d_holding_note_e_4960
+    JRE         note_off_remove_queued_note_4854
 
-    CALL        FUN_4986
-    JRE         FUN_48ad
+    CALL        channel_note_stack_pop_entry_1_if_active_4995
+    JRE         note_off_release_paired_voice_48ad
 
-    JR          UNKNOWN_note_on_solo_mode_porta_on_48b4
+    JR          note_on_solo_mode_48b4
 
 ; =============================================================================
-UNKNOWN_note_on_solo_mode_porta_on_48cf:
-    JR          UNKNOWN_note_on_solo_mode_porta_on_48b4
+note_on_solo_mode_porta_48cf:
+    JR          note_on_solo_mode_48b4
 
 ; =============================================================================
-UNKNOWN_note_on_solo_mode_porta_on_multiple_voices_48be:
-    JRE         UNKNOWN_note_on_solo_mode_porta_on_multiple_voices_4896
+note_on_solo_mode_porta_multiple_voices_48be:
+    JRE         note_on_solo_mode_porta_on_multiple_voices_4896
 
 ; =============================================================================
 returns_48d3:
     RET
 
-UNKNOWN_note_off_sub_48d4:
-    JRE         UNKNOWN_note_off_sub_48a3
+; =============================================================================
+note_off_solo_mode_porta_multiple_voices_48d4:
+    JRE         note_off_tone_mix_porta_multiple_voices_48a3
 
 ; =============================================================================
 ; HL: Channel Info (0x8100).
 ;
 ; Returns:
-; Skips if voice found?
+; Skips on return if a free voice was found.
 ; =============================================================================
 note_on_basic_mode_find_voice_48d6:
     PUSH        DE
@@ -10574,14 +10587,17 @@ note_on_basic_mode_find_voice_48d6:
 
 ; This creates a pointer to the voice note number array. 8190 + x...
 ; HL = 0x8190[last voice index].
-    LDAX        (HL+CHANNEL_INFO_LAST_VOICE_NUMBER_MAYBE)
+    LDAX        (HL+CHANNEL_INFO_LAST_VOICE_NUMBER)
     MOV         L,A
     MVI         H,081h
 
-; B = 0x97 - 0x90 + voice number.
+; B = 0x97 - 0x90 + voice number: voice slots remaining from here to the end
+; of the array (the "search forward" phase's loop count).
     SUB         B,A
 
-; C = 0x90 + Voice# - 90.
+; C = 0x90 + Voice# - 90 = Voice# (0-7): voice slots from the start of the
+; array up to (not including) the last-used voice (the wraparound phase's
+; loop count).
     SUB         A,E
     MOV         C,A
 
@@ -10593,7 +10609,7 @@ note_on_basic_mode_find_voice_48d6:
     JRE         note_on_basic_mode_find_voice_two_lines_490e
 
 ; =============================================================================
-; A: 0x90 + Found voice index.
+; HL: ?
 ; =============================================================================
 note_on_basic_mode_voice_not_found_48ec:
     POP         HL
@@ -10603,8 +10619,6 @@ note_on_basic_mode_voice_not_found_48ec:
     STAX        (HL)
     RET
 
-; =============================================================================
-; A: 0x90 + Found voice index.
 ; =============================================================================
 note_on_basic_mode_voice_found_48f3:
 ; Subtract 1, because the found voice index is 1-based.
@@ -10694,7 +10708,11 @@ note_on_basic_mode_voice_found_from_start_492b:
     JRE         note_on_basic_mode_voice_found_48f3
 
 ; =============================================================================
-FUN_492e:
+; Basic-mode-with-portamento voice allocator.
+; Returns:
+; D: 0x90 + free voice index (on success, via RETS).
+; =============================================================================
+note_on_basic_porta_on_find_voice_492e:
     PUSH        DE
     LXI         DE,voice_note_numbers_8190
     MVI         A,80h
@@ -10727,36 +10745,35 @@ LAB_494a:
 ; =============================================================================
 ; HL: Channel Info (0x8100).
 ; =============================================================================
-note_on_sets_channel_flag_UNKNOWN_494f:
+note_on_set_note_held_flag_494f:
     LDAX        (HL+CHANNEL_INFO_FLAGS)
-    ORI         A,CHANNEL_INFO_FLAGS_8
+    ORI         A,CHANNEL_INFO_FLAGS_NOTE_HELD
     STAX        (HL+CHANNEL_INFO_FLAGS)
     RET
 
 ; =============================================================================
 ; HL: Channel Info (0x8100).
 ; =============================================================================
-note_off_clears_channel_flag_UNKNOWN_4954:
+note_off_clear_note_held_flag_4954:
     LDAX        (HL+CHANNEL_INFO_FLAGS)
-    ANI         A,(~CHANNEL_INFO_FLAGS_8)
+    ANI         A,(~CHANNEL_INFO_FLAGS_NOTE_HELD)
     STAX        (HL+CHANNEL_INFO_FLAGS)
     RET
 
 ; =============================================================================
 note_off_UNKNOWN_4959:
-    CALL        note_off_UNKNOWN_4a15
+    CALL        note_off_save_channel_info_4a15
     CALL        note_off_UNKNOWN_4a4a
     RET
 
 ; =============================================================================
-; Is this searching for a note?
-; Seems to be only reached in solo mode.
+; Checks whether the voice# in D is holding note# in E.
 ; D: Voice#.
-; E: Note#.
+; E: Note# (bit 7 clear; forced back on below for the array comparison).
 ; Returns:
-; Skips on return if...
+; Skips on return if the note AND origin both match (voice should be released).
 ; =============================================================================
-UNKNOWN_note_off_sub_4960:
+note_off_is_voice_d_holding_note_e_4960:
     LXI         BC,voice_note_numbers_8190
 
 ; C = D.
@@ -10770,7 +10787,7 @@ UNKNOWN_note_off_sub_4960:
     EQAX        (BC)
     RET
 
-; BC = 0x8190 + Voice# + 8.
+; BC = 0x8190 + Voice# + : The matching slot in the note origin array.
     ADI         C,8
     ACI         B,0
 ; Check whether this note event has the same origin as the note event at
@@ -10781,73 +10798,88 @@ UNKNOWN_note_off_sub_4960:
     RETS
 
 ; =============================================================================
-MAYBE_increment_voice_number_in_d_4977:
+; D: Voice#.
+; =============================================================================
+advance_voice_number_in_d_4977:
     ADI         D,1
 ; Test if multiple lines selected (1+2 / 1+1').
 ; If so, an extra voice is used.
     OFFIW       (V_OFFSET(channel_pflags_0_801b)),2
     ADI         D,1
-; Clamp at 0x98.
+; If over 0x98, wrap around to 0x90.
     LTI         D,098h
     MVI         D,090h
     RET
 
 ; =============================================================================
-; EA: ?
 ; HL: Channel info (0x8100).
+; Returns:
+; Skips on return if note not active?
 ; =============================================================================
-FUN_4986:
-    LDEAX       (HL+CHANNEL_INFO_3)
+channel_note_stack_pop_entry_1_if_active_4995:
+    LDEAX       (HL+CHANNEL_INFO_ACTIVE_NOTE_STACK_1)
     MOV         A,EAL
+; If note == 0xFF, return.
     NEI         A,0FFh
     RET
+
     MOV         E,A
     MOV         A,EAH
     STAW        (V_OFFSET(current_note_event_origin_8015))
-    CALL        FUN_49b5
+    CALL        channel_note_stack_pop_entry_1_49b5
     RETS
 
 ; =============================================================================
-FUN_4995:
+; Searches the selected channel's active note stack for a note matching E.
+; If found, it's popped from the stack.
+; E:  Note# (bit 7 ignored).
+; HL: Channel info (0x8100).
+; =============================================================================
+channel_note_stack_find_and_pop_4995:
     MOV         A,E
     ANI         A,01111111b
     MOV         C,A
     LDAW        (V_OFFSET(current_note_event_origin_8015))
     MOV         B,A
-    LDEAX       (HL+3)
-    DNE         EA,BC
-    JR          FUN_49b5
 
-    LDEAX       (HL+5)
+    LDEAX       (HL+CHANNEL_INFO_ACTIVE_NOTE_STACK_1)
     DNE         EA,BC
-    JR          LAB_49bb
+    JR          channel_note_stack_pop_entry_1_49b5
 
-    LDEAX       (HL+7)
+    LDEAX       (HL+CHANNEL_INFO_ACTIVE_NOTE_STACK_2)
     DNE         EA,BC
-    JR          LAB_49c1
+    JR          channel_note_stack_pop_entry_2_49bb
 
-    LDEAX       (HL+9)
+    LDEAX       (HL+CHANNEL_INFO_ACTIVE_NOTE_STACK_3)
     DNE         EA,BC
-    JR          LAB_49c7
+    JR          channel_note_stack_pop_entry_3_49c1
+
+    LDEAX       (HL+CHANNEL_INFO_ACTIVE_NOTE_STACK_4)
+    DNE         EA,BC
+    JR          channel_note_stack_pop_entry_4_49c7
 
     RET
 
 ; =============================================================================
-FUN_49b5:
-    LDEAX       (HL+5)
-    STEAX       (HL+3)
+; The following procedures pop a single note from the active note stack.
+; The other entries are shifted forward one entry to fill the gap, and the
+; final entry is filled with 0xFF.
+; =============================================================================
+channel_note_stack_pop_entry_1_49b5:
+    LDEAX       (HL+CHANNEL_INFO_ACTIVE_NOTE_STACK_2)
+    STEAX       (HL+CHANNEL_INFO_ACTIVE_NOTE_STACK_1)
 
-LAB_49bb:
-    LDEAX       (HL+7)
-    STEAX       (HL+5)
+channel_note_stack_pop_entry_2_49bb:
+    LDEAX       (HL+CHANNEL_INFO_ACTIVE_NOTE_STACK_3)
+    STEAX       (HL+CHANNEL_INFO_ACTIVE_NOTE_STACK_2)
 
-LAB_49c1:
-    LDEAX       (HL+9)
-    STEAX       (HL+7)
+channel_note_stack_pop_entry_3_49c1:
+    LDEAX       (HL+CHANNEL_INFO_ACTIVE_NOTE_STACK_4)
+    STEAX       (HL+CHANNEL_INFO_ACTIVE_NOTE_STACK_3)
 
-LAB_49c7:
+channel_note_stack_pop_entry_4_49c7:
     LXI         EA,0FFh
-    STEAX       (HL+9)
+    STEAX       (HL+CHANNEL_INFO_ACTIVE_NOTE_STACK_4)
     RET
 
 ; =============================================================================
@@ -10856,7 +10888,7 @@ LAB_49c7:
 ;  Skips on return if note found.
 ;  D : Voice number.
 ; =============================================================================
-find_active_voice_with_note_49ce:
+note_off_basic_mode_find_voice_with_note_49ce:
     PUSH        HL
     PUSH        DE
 
@@ -10908,25 +10940,29 @@ _exit_49f2:
 ; E: Note# & 0x80.
 ; =============================================================================
 note_on_basic_mode_voice_found_49f8:
-    CALL        note_on_UNKNOWN_49ff
-    CALL        note_on_UNKNOWN_4a6e
+    CALL        note_on_save_channel_info_49ff
+    CALL        note_on_trigger_voice_MAYBE_4a6e
     RET
 
 ; ============================================================================
+; - Saves last voice number for this channel (D).
+; - Sets note on flag on note (E).
 ; D: 0x90 + Voice#.
-; E: Note# & 0x80.
+; E: Note#.
 ; =============================================================================
-note_on_UNKNOWN_49ff:
+note_on_save_channel_info_49ff:
     ORI         E,KEYBOARD_NOTE_ON
     MOV         A,D
-    STAX        (HL+CHANNEL_INFO_LAST_VOICE_NUMBER_MAYBE)
+    STAX        (HL+CHANNEL_INFO_LAST_VOICE_NUMBER)
 ; Falls-through below.
 
 ; ============================================================================
+; - Writes voice D's new note number in voice_note_numbers_8190.
+; - Saves note origin in voice_note_origin_8198.
 ; D: 0x90 + Voice#.
 ; E: Note#. (MSB decides note on or off)
 ; =============================================================================
-note_on_off_UNKNOWN_4a05:
+note_on_off_save_note_number_and_origin_4a05:
 ; 0x8190[Voice#] = Note#.
     PUSH        HL
     MOV         L,A
@@ -10940,6 +10976,7 @@ note_on_off_UNKNOWN_4a05:
 
 ; Note on.
 ; 0x8198[Voice#] = (0x8015).
+; voice_note_origin_8198
     LDAW        (V_OFFSET(current_note_event_origin_8015))
     STAX        (HL+8)
 
@@ -10948,47 +10985,55 @@ _note_off_4a13:
     RET
 
 ; =============================================================================
-note_off_UNKNOWN_4a15:
+; D: 0x90 + Voice#.
+; E: Note#. (MSB decides note on or off)
+; =============================================================================
+note_off_save_channel_info_4a15:
     ANI         E,(~KEYBOARD_NOTE_ON & 0FFh)
     MOV         A,D
-    JR          note_on_off_UNKNOWN_4a05
+    JR          note_on_off_save_note_number_and_origin_4a05
 
 ; =============================================================================
+; Push whatever note is currently active on the specified voice to the
+; channel's active note stack.
 ; A:  Channel flags shifted.
 ; D:  Voice#.
 ; E:  Note# & 0x80.
 ; HL: Channel Info (0x8100).
 ; =============================================================================
-note_on_UNKNOWN_4a1a:
+note_on_push_new_note_to_channel_note_stack_4a1a:
     MVI         B,081h
-; C = Voice#.
+; C = Voice#. BC = voice_note_numbers_8190 + Voice#.
     MOV         A,D
     MOV         C,A
 
-; A = 0x8100[voice#].
+; A = voice_note_numbers_8190[voice#]: the note this voice is currently
+; playing, about to be overwritten.
     LDAX        (BC)
     ANI         A,(~KEYBOARD_NOTE_ON & 0FFh)
 
     MOV         E,A
-    CALL        note_UNKNOWN_4a26
+    CALL        channel_note_stack_push_4a26
     RET
 
 ; =============================================================================
+; Pushes (Note# & 0x7F):Note Origin onto the current channel's note stack.
+; Shifts the existing entries down and stores the incoming entry on the top.
 ; HL: Channel Info (0x8100).
 ; D:  Voice#.
 ; E:  Note#.
 ; =============================================================================
-note_UNKNOWN_4a26:
+channel_note_stack_push_4a26:
     PUSH        DE
 
-    LDEAX       (HL+CHANNEL_INFO_7)
-    STEAX       (HL+CHANNEL_INFO_9)
+    LDEAX       (HL+CHANNEL_INFO_ACTIVE_NOTE_STACK_3)
+    STEAX       (HL+CHANNEL_INFO_ACTIVE_NOTE_STACK_4)
 
-    LDEAX       (HL+CHANNEL_INFO_5)
-    STEAX       (HL+CHANNEL_INFO_7)
+    LDEAX       (HL+CHANNEL_INFO_ACTIVE_NOTE_STACK_2)
+    STEAX       (HL+CHANNEL_INFO_ACTIVE_NOTE_STACK_3)
 
-    LDEAX       (HL+CHANNEL_INFO_3)
-    STEAX       (HL+CHANNEL_INFO_5)
+    LDEAX       (HL+CHANNEL_INFO_ACTIVE_NOTE_STACK_1)
+    STEAX       (HL+CHANNEL_INFO_ACTIVE_NOTE_STACK_2)
 
 ; EAL = Note# & 0x7F.
     MOV         A,E
@@ -11000,11 +11045,12 @@ note_UNKNOWN_4a26:
     LXI         DE,voice_note_numbers_8190
     MOV         E,A
 
-; A = 0x8198[Voice#].
+; Load the note origin.
     LDAX        (DE+8)
 
+; Active note stack 1 = Note# : Note origin.
     MOV         EAH,A
-    STEAX       (HL+CHANNEL_INFO_3)
+    STEAX       (HL+CHANNEL_INFO_ACTIVE_NOTE_STACK_1)
     POP         DE
     RET
 
@@ -11014,7 +11060,7 @@ note_UNKNOWN_4a26:
 note_off_UNKNOWN_4a4a:
     PUSH        HL
     PUSH        DE
-    CALL        note_on_off_UNKNOWN_4a63
+    CALL        note_on_off_remap_voice_number_UNKNOWN_4a63
     CALL        note_off_UNKNOWN_7363
     POP         DE
     POP         HL
@@ -11025,7 +11071,7 @@ note_off_UNKNOWN_4a4a:
 ; =============================================================================
     PUSH        HL
     PUSH        DE
-    CALL        note_on_off_UNKNOWN_4a63
+    CALL        note_on_off_remap_voice_number_UNKNOWN_4a63
     CALL        FUN_734d
     POP         DE
     POP         HL
@@ -11039,81 +11085,98 @@ note_off_UNKNOWN_4a4a:
 ; Falls-through below.
 
 ; =============================================================================
+; Remaps a 0x90-based voice number to an unknown index.
 ; D: 0x90 + Voice#.
+; Returns:
+; D: Remapped voice#
 ; =============================================================================
-note_on_off_UNKNOWN_4a63:
+note_on_off_remap_voice_number_UNKNOWN_4a63:
+; A = voice# - 0x90.
     MOV         A,D
     SUI         A,090h
+; If the voice# is odd, XOR bit 2.
+; This converts as follows: (0->0, 1->5, 2->2, 3->7, 4->4, 5->1, 6->6, 7->3).
+; The reasons for this is unknown.
     OFFI        A,1
     XRI         A,04h
+; Clamp.
     ANI         A,00001111b
     MOV         D,A
     RET
 
 ; =============================================================================
-note_on_UNKNOWN_4a6e:
+note_on_trigger_voice_MAYBE_4a6e:
     PUSH        HL
     PUSH        DE
-    CALL        note_UNKNOWN_4aba
-    CALL        note_on_off_UNKNOWN_4a63
-    CALL        FUN_4a9e
-    CALL        FUN_6ed0
+    CALL        note_on_get_upd933_pitch_MAYBE_4aba
+    CALL        note_on_off_remap_voice_number_UNKNOWN_4a63
+    CALL        note_on_setup_channel_if_first_note_4a9e
+    CALL        upd933_note_on_UNKNOWN_6ed0
     POP         DE
     POP         HL
     RET
 
 ; =============================================================================
-FUN_4a7f:
+; Same as the above, but calls a different upd933 function?
+; =============================================================================
+note_on_trigger_voice_MAYBE_4a7f:
     PUSH        HL
     PUSH        DE
-    CALL        note_UNKNOWN_4aba
-    CALL        note_on_off_UNKNOWN_4a63
-    CALL        FUN_4a9e
-    CALL        FUN_6ece
+    CALL        note_on_get_upd933_pitch_MAYBE_4aba
+    CALL        note_on_off_remap_voice_number_UNKNOWN_4a63
+    CALL        note_on_setup_channel_if_first_note_4a9e
+    CALL        upd933_note_on_UNKNOWN_6ece
     POP         DE
     POP         HL
     RET
 
 ; =============================================================================
-FUN_4a90:
+; Called by the Solo-mode "multiple voices" note on handlers.
+; =============================================================================
+note_on_trigger_voice_glide_4a90:
     PUSH        HL
     PUSH        DE
-    CALL        note_UNKNOWN_4aba
-    CALL        note_on_off_UNKNOWN_4a63
+    CALL        note_on_get_upd933_pitch_MAYBE_4aba
+    CALL        note_on_off_remap_voice_number_UNKNOWN_4a63
     CALL        FUN_7842
     POP         DE
     POP         HL
     RET
 
 ; =============================================================================
-FUN_4a9e:
+; Ensures the channel setup is run if this is its first active note.
+; HL: Channel Info (0x8100).
+; =============================================================================
+note_on_setup_channel_if_first_note_4a9e:
     PUSH        HL
     PUSH        DE
-    LDAX        (HL+2)
-    NEI         A,1
-    CALL        UNKNOWN_set_up_channel_4aaa
+    LDAX        (HL+CHANNEL_INFO_NOTE_COUNT)
+    NEI         A,1          ; Skip if A != 1.
+    CALL        note_on_set_up_channel_UNKNOWN_4aaa
     POP         DE
     POP         HL
     RET
 
 ; =============================================================================
-UNKNOWN_set_up_channel_4aaa:
+note_on_set_up_channel_UNKNOWN_4aaa:
     OFFIW       (V_OFFSET(UNKNOWN_flags_8031)),FLAGS_8031_SOLO_MODE
     JR          _solo_mode_active_4ab2
 
-    CALL        patch_call_function_per_channel_7793
+    CALL        UNKNOWN_channel_setup_7793
     RET
 
 _solo_mode_active_4ab2:
     MOV         A,D
     SLR         A
     MOV         D,A
-    CALL        patch_called_per_channel_7776
+    CALL        UNKNOWN_called_per_channel_7776
 
     RET
 
 ; =============================================================================
-note_UNKNOWN_4aba:
+; Unknown. This probably converts a note# into a pitch table index.
+; =============================================================================
+note_on_get_upd933_pitch_MAYBE_4aba:
     PUSH        HL
     PUSH        DE
     MOV         A,E
@@ -11892,7 +11955,7 @@ UNKNOWN_vibrato_4dc9:
     DW          _solo_on_vibrato_off_4e04
 
 _solo_off_vibrato_on_4de7:
-    CALL        patch_call_function_per_channel_7793
+    CALL        UNKNOWN_channel_setup_7793
     CALL        FUN_796f
 
 _enable_vibrato_led_and_exit_4ded:
@@ -11900,7 +11963,7 @@ _enable_vibrato_led_and_exit_4ded:
     RET
 
 _solo_off_vibrato_off_4df1:
-    CALL        patch_call_function_per_channel_7793
+    CALL        UNKNOWN_channel_setup_7793
     CALL        FUN_7974
 
 _disable_vibrato_led_and_exit_4df7:
@@ -11909,14 +11972,14 @@ _disable_vibrato_led_and_exit_4df7:
 
 _solo_on_vibrato_on_4dfb:
     PUSH        DE
-    CALL        patch_called_per_channel_7776
+    CALL        UNKNOWN_called_per_channel_7776
     POP         DE
     CALL        FUN_7971
     JR          _enable_vibrato_led_and_exit_4ded
 
 _solo_on_vibrato_off_4e04:
     PUSH        DE
-    CALL        patch_called_per_channel_7776
+    CALL        UNKNOWN_called_per_channel_7776
     POP         DE
     CALL        voice_vibrato_on_off_UNKNOWN_0_7976
     JR          _disable_vibrato_led_and_exit_4df7
@@ -14862,7 +14925,7 @@ LAB_6e4c:
 
 LAB_6e5e:
     LHLD        (unknown_pointer_80e1)
-    CALL        UNKNOWN_upd933_6f5f
+    CALL        upd933_UNKNOWN_6f5f
     RET
 
 LAB_6e66:
@@ -14968,7 +15031,7 @@ upd933_data_UNKNOWN_6ecb:
 ; D: Voice #?
 ; E:?
 ; =============================================================================
-FUN_6ece:
+upd933_note_on_UNKNOWN_6ece:
     MVI         A,0
 ; Falls-through below.
 
@@ -14977,7 +15040,7 @@ FUN_6ece:
 ; D: Voice #?
 ; E:?
 ; =============================================================================
-FUN_6ed0:
+upd933_note_on_UNKNOWN_6ed0:
     MVI         A,010h
     STAW        (V_OFFSET(intein_intad_pending_flag_80ea))
     MOV         A,E
@@ -15029,7 +15092,7 @@ LAB_6f19:
     POP         V
     MOV         MKL,A
     BIT         3,(V_OFFSET(UNKNOWN_flags_80e5))
-    CALL        UNKNOWN_upd933_6f5f
+    CALL        upd933_UNKNOWN_6f5f
     RET
 
 ; =============================================================================
@@ -15067,6 +15130,7 @@ LAB_6f31:
     LXI         HL,upd933_data_UNKNOWN_6f5c
     CALL        upd933_send_register_and_data_at_hl_743b
     POP         HL
+
 LAB_6f5b:
     RET
 
@@ -15079,7 +15143,7 @@ upd933_data_UNKNOWN_6f5c:
 ; Called during DCA IRQ.
 ; HL: 0x8640[voice]
 ; =============================================================================
-UNKNOWN_upd933_6f5f:
+upd933_UNKNOWN_6f5f:
 ; Save MKL state, and mask all interrupts.
     MOV         A,MKL
     PUSH        V
@@ -15862,7 +15926,7 @@ upd933_load_voice_idx_from_hl_data_in_ea_733f:
 FUN_734d:
     CALL        clear_80f5_at_index_d_7d83
     ORIW        (V_OFFSET(UNKNOWN_flags_80c9)),FLAGS_80C9_10
-    JR          FUN_736e
+    JR          note_UNKNOWN_736e
 
 ; =============================================================================
 FUN_7354:
@@ -15876,19 +15940,19 @@ FUN_7354:
 ; =============================================================================
 note_off_UNKNOWN_7363:
     ONIW        (V_OFFSET(current_note_event_origin_8015)),KEYBOARD_NOTE_ON
-    JR          FUN_736b
+    JR          note_UNKNOWN_736b
 
 ; Flag set?
     CALL        d_used_as_index_to_store_080_80f5_7da7h
     RET
 
 ; =============================================================================
-FUN_736b:
+note_UNKNOWN_736b:
     ANIW        (V_OFFSET(UNKNOWN_flags_80c9)),00001111b
 ; Falls-through below.
 
 ; =============================================================================
-FUN_736e:
+note_UNKNOWN_736e:
     MVIW        (V_OFFSET(UNKNOWN_voice_number_bitmask_80D4)),1
     MOV         A,D
     STAW        (V_OFFSET(MAYBE_voice_number_80d3))
@@ -16746,7 +16810,7 @@ upd933_data_UNKNOWN_7773:
 ; Called per channel(?) when changing patch, or starting a new note.
 ; D: Channel index?
 ; =============================================================================
-patch_called_per_channel_7776:
+UNKNOWN_called_per_channel_7776:
     MOV         A,D
 
 ; Calculate an index into buffer at 0x8600.
@@ -16769,13 +16833,15 @@ patch_called_per_channel_7776:
     RET
 
 ; =============================================================================
-patch_call_function_per_channel_7793:
+; Unknown. Calls a function per-channel.
+; =============================================================================
+UNKNOWN_channel_setup_7793:
     MVI         A,0
 
 _channel_loop_7795:
     PUSH        V
     MOV         D,A
-    CALL        patch_called_per_channel_7776
+    CALL        UNKNOWN_called_per_channel_7776
     POP         V
 
 ; Increment A.
@@ -18168,7 +18234,7 @@ LAB_7db9:
     PUSH        BC
     MOV         D,A
     EI
-    CALL        FUN_736b
+    CALL        note_UNKNOWN_736b
     DI
     POP         BC
     POP         HL
