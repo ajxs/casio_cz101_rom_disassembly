@@ -244,7 +244,7 @@ midi_sysex_array_8500:                                          EQU 8500h
 ; 4 entries of size 0x10.
 unknown_voice_data_8600:                                        EQU 8600h
 
-; 8 entries size 0x28 = 320 bytes?
+; 8 entries size 0x28 = 320 bytes.
 ; Ends at 0x8780.
 ; See associated structure definitions.
 MAYBE_voice_data_8640:                                          EQU 8640h
@@ -5376,13 +5376,13 @@ midi_process_cc_31a6:
     JMP         midi_process_cc_vibrato_on_off_UNKNOWN_3267
 
     NEI         A,5
-    JMP         MAYBE_midi_process_cc_porta_time_329b
+    JMP         midi_process_cc_porta_time_329b
 
     NEI         A,06h
     JMP         midi_process_cc_master_tune_32af
 
     NEI         A,7
-    JMP         midi_process_cc_UNKNOWN_32b4
+    JMP         midi_process_cc_volume_MAYBE_32b4
     RET
 
 ; =============================================================================
@@ -5576,7 +5576,8 @@ _incoming_vibrato_off_voice_not_selected_3296:
     RET
 
 ; =============================================================================
-MAYBE_midi_process_cc_porta_time_329b:
+midi_process_cc_porta_time_329b:
+; Clamp new portamento time value at 0x63.
     LDAW        (V_OFFSET(midi_incoming_data_second_byte_805e))
     LTI         A,064h
     MVI         A,063h
@@ -5593,7 +5594,11 @@ midi_process_cc_master_tune_32af:
     JMP         master_tune_update_2953
 
 ; =============================================================================
-midi_process_cc_UNKNOWN_32b4:
+; Is this actually used?
+; The schematics indicate PA wired to the LCD, and line 4 of PC not connected.
+; @TODO: Needs testing with a real device.
+; =============================================================================
+midi_process_cc_volume_MAYBE_32b4:
     LDAW        (V_OFFSET(midi_incoming_data_second_byte_805e))
     SLR         A
     SLR         A
