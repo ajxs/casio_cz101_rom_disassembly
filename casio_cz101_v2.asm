@@ -492,24 +492,32 @@ VOICE_DATA_8600_C:                              EQU 0Ch
 
 ; Voice info structure at 8640h
 VOICE_INFO_8640_0_VOICE_NUMBER:                 EQU 00h
-VOICE_INFO_8640_1_PTR_TO_OTHER_VOICE:           EQU 01h
-VOICE_INFO_8640_2:                              EQU 02h
-VOICE_INFO_8640_3_PTR_TO_OTHER_VOICE:           EQU 03h
-VOICE_INFO_8640_4:                              EQU 04h
+; A pointer to the second voice used when playing a two-line tone.
+; Mapping: 0<->5, 1<->4, 2<->7, 3<->6 (XOR 5).
+VOICE_INFO_8640_1_PTR_TO_LINE_PAIR_VOICE:       EQU 01h
+; A pointer to the second voice used when playing a tone mix tone.
+; Mapping: 0->2, 1->6, 2->0, 3->4, 4->6, 5->2, 6->4, 7->0
+; (Always maps to an even number voice).
+VOICE_INFO_8640_3_PTR_TO_TONE_MIX_VOICE:        EQU 03h
 VOICE_INFO_8640_5_PTR_TO_PATCH_BFR_EDIT:        EQU 05h
-VOICE_INFO_8640_6:                              EQU 06h
 VOICE_INFO_8640_7_PTR_TO_8600:                  EQU 07h
 VOICE_INFO_8640_8_WORD:                         EQU 08h
-VOICE_INFO_8640_9:                              EQU 09h
-VOICE_INFO_8640_a:                              EQU 0ah
-VOICE_INFO_8640_b:                              EQU 0bh
-VOICE_INFO_8640_C_WORD:                         EQU 0ch
-VOICE_INFO_8640_d:                              EQU 0dh
-VOICE_INFO_8640_e:                              EQU 0eh
-VOICE_INFO_8640_F_WORD:                         EQU 0fh
-VOICE_INFO_8640_10:                             EQU 010h
+VOICE_INFO_8640_NOTE_UNKNOWN:                   EQU 09h
+
+VOICE_INFO_8640_A_NOTE_TARGET:                  EQU 0ah
+VOICE_INFO_8640_B_NOTE_PREV:                    EQU 0bh
+VOICE_INFO_8640_C_NOTE_DISTANCE:                EQU 0ch
+VOICE_INFO_8640_D_NOTE_INCOMING:                EQU 0dh
+
+; Fixed-point portamento frequency accumulator.
+; The increment (at offset 0x22/23) is added to the accumulator with each tick
+; at 0x7B8C (UNKNOWN_voice_7878).
+; The increment value is calculated in porta_UNKNOWN_7103, it's scaled
+; according to the distance.
+VOICE_INFO_8640_E_ACCUMULATOR_LSB:              EQU 0eh
+VOICE_INFO_8640_F_ACCUMULATOR_MSB:              EQU 0fh
+VOICE_INFO_8640_10_ACC_HIGH:                    EQU 010h
 VOICE_INFO_8640_11_FREQUENCY:                   EQU 011h
-VOICE_INFO_8640_12_FREQUENCY_HIGH:              EQU 012h
 
 ; Flags?
 VOICE_INFO_8640_13_FLAGS_UNKNOWN:               EQU 013h
@@ -518,6 +526,7 @@ VOICE_INFO_8640_13_80:                          EQU 1 << 7
 VOICE_INFO_8640_13_40:                          EQU 1 << 6
 VOICE_INFO_8640_13_8:                           EQU 1 << 3
 VOICE_INFO_8640_13_4:                           EQU 1 << 2
+VOICE_INFO_8640_13_2:                           EQU 1 << 1
 VOICE_INFO_8640_13_1:                           EQU 1
 
 
@@ -536,7 +545,7 @@ VOICE_INFO_8640_15_80:                          EQU 1 << 7
 VOICE_INFO_8640_15_40:                          EQU 1 << 6
 ; This bit seems to be set when vibrato disabled.
 VOICE_INFO_8640_15_20:                          EQU 1 << 5
-VOICE_INFO_8640_15_10:                          EQU 1 << 4
+VOICE_INFO_8640_15_PORTA_DESCENDING:            EQU 1 << 4
 VOICE_INFO_8640_15_8:                           EQU 1 << 3
 VOICE_INFO_8640_15_4:                           EQU 1 << 2
 VOICE_INFO_8640_15_TONE_MIX:                    EQU 1 << 1
@@ -559,13 +568,14 @@ VOICE_INFO_8640_18_DCW_ENV_CURRENT_STEP_MAYBE:  EQU 018h
 
 VOICE_INFO_8640_19_DCO_ENV_CURRENT_STEP_MAYBE:  EQU 019h
 VOICE_INFO_8640_1A_WORD_UNKNOWN:                EQU 01ah
-VOICE_INFO_8640_1E_PITCH_UNKNOWN:               EQU 01eh
-VOICE_INFO_8640_1F:                             EQU 01fh
-VOICE_INFO_8640_20:                             EQU 020h
-VOICE_INFO_8640_21:                             EQU 021h
-VOICE_INFO_8640_22:                             EQU 022h
-VOICE_INFO_8640_23:                             EQU 023h
+
+VOICE_INFO_8640_1E_FREQ_WORD_PREV:              EQU 01eh
+VOICE_INFO_8640_20_FREQ_WORD_TARGET:            EQU 020h
+VOICE_INFO_8640_22_ACC_INCREMENT_FRACTION:      EQU 022h
+VOICE_INFO_8640_23_ACC_INCREMENT_WORD:          EQU 023h
 VOICE_INFO_8640_25:                             EQU 025h
+VOICE_INFO_8640_26:                             EQU 026h
+VOICE_INFO_8640_27:                             EQU 027h
 VOICE_INFO_8640_47:                             EQU 047h
 
 LED_1_COMPARE:                                  EQU 1 << 0
@@ -14574,12 +14584,12 @@ MAYBE_voice_data_reset_6c92:
 _reset_voice_loop_6c9b:
 ; Store the voice number in HL+0.
     LDAW        (V_OFFSET(MAYBE_voice_number_80d3))
-    DW 00BFh   ;    STAX        (HL+00h)
+    DW 00BFh   ;    STAX        (HL+VOICE_INFO_8640_0_VOICE_NUMBER)
 
     LDEAX       (DE++)
-    STEAX       (HL+VOICE_INFO_8640_1_PTR_TO_OTHER_VOICE)
+    STEAX       (HL+VOICE_INFO_8640_1_PTR_TO_LINE_PAIR_VOICE)
     LDEAX       (DE++)
-    STEAX       (HL+VOICE_INFO_8640_3_PTR_TO_OTHER_VOICE)
+    STEAX       (HL+VOICE_INFO_8640_3_PTR_TO_TONE_MIX_VOICE)
 
     LXI         EA,patch_buffer_edit_8300
     STEAX       (HL+VOICE_INFO_8640_5_PTR_TO_PATCH_BFR_EDIT)
@@ -14588,18 +14598,18 @@ _reset_voice_loop_6c9b:
     STEAX       (HL+VOICE_INFO_8640_7_PTR_TO_8600)
 
     MVI         A,1Dh
-    STAX        (HL+VOICE_INFO_8640_9)
-    STAX        (HL+VOICE_INFO_8640_a)
-    STAX        (HL+VOICE_INFO_8640_b)
-    STAX        (HL+VOICE_INFO_8640_d)
+    STAX        (HL+VOICE_INFO_8640_NOTE_UNKNOWN)
+    STAX        (HL+VOICE_INFO_8640_A_NOTE_TARGET)
+    STAX        (HL+VOICE_INFO_8640_B_NOTE_PREV)
+    STAX        (HL+VOICE_INFO_8640_D_NOTE_INCOMING)
 
     MVI         A,0
-    STAX        (HL+VOICE_INFO_8640_C_WORD)
-    STAX        (HL+VOICE_INFO_8640_e)
-    STAX        (HL+22h)
+    STAX        (HL+VOICE_INFO_8640_C_NOTE_DISTANCE)
+    STAX        (HL+VOICE_INFO_8640_E_ACCUMULATOR_LSB)
+    STAX        (HL+VOICE_INFO_8640_22_ACC_INCREMENT_FRACTION)
 
     LXI         EA,0
-    STEAX       (HL+VOICE_INFO_8640_F_WORD)
+    STEAX       (HL+VOICE_INFO_8640_F_ACCUMULATOR_MSB)
     STEAX       (HL+VOICE_INFO_8640_11_FREQUENCY)
     STEAX       (HL+VOICE_INFO_8640_1A_WORD_UNKNOWN)
 
@@ -14610,7 +14620,7 @@ _reset_voice_loop_6c9b:
 
     MVI         C,0
 
-; @NOTE: Load patch buffer edit octave setting into A?
+; @NOTE: Load edit patch buffer edit octave setting into A?
     MOV         A,(patch_buffer_edit_8300)
     ONI         A,2
     JR          LAB_6cf1
@@ -14882,7 +14892,7 @@ upd933_check_irq_dca_6dc3:
     ANI         A,0F7h
     STAX        (HL+VOICE_INFO_8640_13_FLAGS_UNKNOWN)
     LDAX        (HL+9)
-    STAX        (HL+0dh)
+    STAX        (HL+VOICE_INFO_8640_D_NOTE_INCOMING)
 
     LDAX        (HL+VOICE_INFO_8640_15_FLAGS_UNKNOWN)
     ONI         A,VOICE_INFO_8640_15_80
@@ -14903,14 +14913,14 @@ LAB_6e2e:
     JRE         LAB_6e5e
 
 ; Test this voice number?
-    LDEAX       (HL+VOICE_INFO_8640_3_PTR_TO_OTHER_VOICE)
+    LDEAX       (HL+VOICE_INFO_8640_3_PTR_TO_TONE_MIX_VOICE)
     DMOV        HL,EA
     DW 00AFh   ;    LDAX        (HL+00h)
     ONI         A,2
     JR          LAB_6e48
 
     PUSH        HL
-    LDEAX       (HL+VOICE_INFO_8640_3_PTR_TO_OTHER_VOICE)
+    LDEAX       (HL+VOICE_INFO_8640_3_PTR_TO_TONE_MIX_VOICE)
     DMOV        HL,EA
     SHLD        (unknown_pointer_80e1)
     POP         HL
@@ -15090,7 +15100,7 @@ LAB_6f00:
     LDEAX       (HL+3)
     DMOV        HL,EA
     CALL        upd933_UNKNOWN_6f22
-    LDAX        (HL+15h)
+    LDAX        (HL+VOICE_INFO_8640_15_FLAGS_UNKNOWN)
     ONI         A,80h
     JR          LAB_6f18
 
@@ -15116,7 +15126,7 @@ upd933_UNKNOWN_6f22:
     JR          LAB_6f31
 
     LDAW        (V_OFFSET(data_80D6))
-    STAX        (HL+VOICE_INFO_8640_d)
+    STAX        (HL+VOICE_INFO_8640_D_NOTE_INCOMING)
     JRE         LAB_6f5b
 
 LAB_6f31:
@@ -15126,7 +15136,7 @@ LAB_6f31:
     ORI         A,8
     STAX        (HL+VOICE_INFO_8640_13_FLAGS_UNKNOWN)
     LDAW        (V_OFFSET(data_80D6))
-    STAX        (HL+VOICE_INFO_8640_9)
+    STAX        (HL+VOICE_INFO_8640_NOTE_UNKNOWN)
     LDEAX       (HL+VOICE_INFO_8640_5_PTR_TO_PATCH_BFR_EDIT)
     MVI         B,014h
     LDAX        (HL+VOICE_INFO_8640_15_FLAGS_UNKNOWN)
@@ -15172,7 +15182,7 @@ upd933_UNKNOWN_6f5f:
 
     ORIW        (V_OFFSET(UNKNOWN_flags_80e5)),1
     PUSH        HL
-    LDEAX       (HL+VOICE_INFO_8640_1_PTR_TO_OTHER_VOICE)
+    LDEAX       (HL+VOICE_INFO_8640_1_PTR_TO_LINE_PAIR_VOICE)
     DMOV        HL,EA
     SHLD        (UNKNOWN_pointer_to_voice_data_80db)
     CALL        voice_frequency_UNKNOWN_7068
@@ -15191,7 +15201,7 @@ LAB_6f8a:
     SHLD        (UNKNOWN_pointer_to_voice_data_80dd)
     CALL        voice_frequency_UNKNOWN_7068
     CALL        upd933_write_voice_frequency_71d1
-    LDAX        (HL+15h)
+    LDAX        (HL+VOICE_INFO_8640_15_FLAGS_UNKNOWN)
     ONI         A,80h
     JR          LAB_6fb8
 
@@ -15330,7 +15340,7 @@ LAB_7077:
     LDAX        (HL+VOICE_INFO_8640_14_FLAGS_UNKNOWN)
     MOV         B,A
 
-    LDEAX       (HL+VOICE_INFO_8640_1E_PITCH_UNKNOWN)
+    LDEAX       (HL+VOICE_INFO_8640_1E_FREQ_WORD_PREV)
     ONI         B,08h
     JR          LAB_7092
 
@@ -15386,21 +15396,24 @@ LAB_70ae:
 
 ; =============================================================================
 ; HL: Voice data (0x8640[voice]).
+; A: Note# incoming.
+; C: Note# prev.
 ; =============================================================================
-FUN_70c4:
-    GTA         C,A
-    JR          LAB_70d0
+porta_stores_note_distance_UNKNOWN_70c4:
+    GTA         C,A ; Skip if C > A.
+    JR          _incoming_note_higher_70d0
 
+; Incoming note is lower than previous note.
     SUB         C,A
     MOV         A,C
-    STAX        (HL+0Ch)
-    CALL        FUN_719b
+    STAX        (HL+VOICE_INFO_8640_C_NOTE_DISTANCE)
+    CALL        porta_incoming_note_lower_UNKNOWN_719b
     RET
 
-LAB_70d0:
+_incoming_note_higher_70d0:
     SUB         A,C
-    STAX        (HL+0Ch)
-    CALL        FUN_71a1
+    STAX        (HL+VOICE_INFO_8640_C_NOTE_DISTANCE)
+    CALL        porta_incoming_note_higher_UNKNOWN_71a1
     RET
 
 ; =============================================================================
@@ -15417,21 +15430,22 @@ porta_UNKNOWN_70dd:
     ONI         A,VOICE_INFO_8640_14_PORTA
     JRE         LAB_712a
 
-; Portamento enabled?
-    LDAX        (HL+VOICE_INFO_8640_a)
-    STAX        (HL+VOICE_INFO_8640_b)
+; Portamento enabled.
+    LDAX        (HL+VOICE_INFO_8640_A_NOTE_TARGET)
+    STAX        (HL+VOICE_INFO_8640_B_NOTE_PREV)
     MOV         C,A
 
-    LDAX        (HL+VOICE_INFO_8640_d)
-    STAX        (HL+VOICE_INFO_8640_a)
-    CALL        FUN_70c4
-    LDAX        (HL+VOICE_INFO_8640_C_WORD)
+    LDAX        (HL+VOICE_INFO_8640_D_NOTE_INCOMING)
+    STAX        (HL+VOICE_INFO_8640_A_NOTE_TARGET)
+    CALL        porta_stores_note_distance_UNKNOWN_70c4
+    LDAX        (HL+VOICE_INFO_8640_C_NOTE_DISTANCE)
     LBCD        (portamento_freq_increment_80cd)
     PUSH        V
     MVI         A,0
-    STAX        (HL+VOICE_INFO_8640_e)
-    STAX        (HL+VOICE_INFO_8640_F_WORD)
-    STAX        (HL+VOICE_INFO_8640_10)
+    STAX        (HL+VOICE_INFO_8640_E_ACCUMULATOR_LSB)
+    STAX        (HL+VOICE_INFO_8640_F_ACCUMULATOR_MSB)
+    STAX        (HL+VOICE_INFO_8640_10_ACC_HIGH)
+    ; Pop and clamp note distance?
     POP         V
     LTI         A,7Fh
     MVI         A,7Fh
@@ -15457,23 +15471,24 @@ porta_UNKNOWN_7103:
     DRLR        EA
     RLR         C
 
-    STEAX       (HL+023h)
+    STEAX       (HL+VOICE_INFO_8640_23_ACC_INCREMENT_WORD)
     MOV         A,C
-    STAX        (HL+22h)
+    STAX        (HL+VOICE_INFO_8640_22_ACC_INCREMENT_FRACTION)
     MOV         A,EAH
     MOV         D,A
-    LDAX        (HL+0Ch)
+    LDAX        (HL+VOICE_INFO_8640_C_NOTE_DISTANCE)
     GTA         A,D
     JR          LAB_712a
 
-    LDAX        (HL+0bh)
+    LDAX        (HL+VOICE_INFO_8640_B_NOTE_PREV)
     JR          LAB_7133
 
 LAB_712a:
-    CALL        FUN_71a9
-    LDAX        (HL+0dh)
-    STAX        (HL+0ah)
-    STAX        (HL+0bh)
+    CALL        sets_voice_flags_UNKNOWN_71a9
+    LDAX        (HL+VOICE_INFO_8640_D_NOTE_INCOMING)
+    STAX        (HL+VOICE_INFO_8640_A_NOTE_TARGET)
+    STAX        (HL+VOICE_INFO_8640_B_NOTE_PREV)
+
 LAB_7133:
     LDEAX       (HL+01ch)
     DMOV        DE,EA
@@ -15485,7 +15500,7 @@ LAB_7133:
     JR          LAB_7150
 
     CALL        add_de_to_ea_clamp_at_ffff_0245
-    STEAX       (HL+01eh)
+    STEAX       (HL+VOICE_INFO_8640_1E_FREQ_WORD_PREV)
     LDAX        (HL+0dh)
     MOV         EAH,A
     MVI         A,0
@@ -15495,14 +15510,14 @@ LAB_7133:
 
 LAB_7150:
     CALL        subtract_de_from_ea_clamp_at_0_024b
-    STEAX       (HL+01eh)
+    STEAX       (HL+VOICE_INFO_8640_1E_FREQ_WORD_PREV)
     LDAX        (HL+0dh)
     MOV         EAH,A
     MVI         A,0
     MOV         EAL,A
     CALL        subtract_de_from_ea_clamp_at_0_024b
 LAB_715f:
-    STEAX       (HL+020h)
+    STEAX       (HL+VOICE_INFO_8640_20_FREQ_WORD_TARGET)
     PUSH        HL
     LDAX        (HL+15h)
     OFFI        A,40h
@@ -15545,28 +15560,33 @@ LAB_717b:
     RET
 
 ; =============================================================================
-FUN_719b:
+; HL: Voice data (0x8640[voice]).
+; =============================================================================
+porta_incoming_note_lower_UNKNOWN_719b:
     DI
-    LDAX        (HL+13h)
-    ORI         A,06h
-    JR          LAB_71b0
+    LDAX        (HL+VOICE_INFO_8640_13_FLAGS_UNKNOWN)
+    ORI         A,VOICE_INFO_8640_13_4 | VOICE_INFO_8640_13_2
+    JR          _store_flag_71b0
 
 ; =============================================================================
-FUN_71a1:
+; HL: Voice data (0x8640[voice]).
+; =============================================================================
+porta_incoming_note_higher_UNKNOWN_71a1:
     DI
-    LDAX        (HL+13h)
-    ANI         A,0f9h
-    ORI         A,04h
-    JR          LAB_71b0
+    LDAX        (HL+VOICE_INFO_8640_13_FLAGS_UNKNOWN)
+    ANI         A,11111001b
+    ORI         A,VOICE_INFO_8640_13_4
+    JR          _store_flag_71b0
 
 ; =============================================================================
-FUN_71a9:
+sets_voice_flags_UNKNOWN_71a9:
     DI
-    LDAX        (HL+13h)
-    ANI         A,0f9h
-    ORI         A,2
-LAB_71b0:
-    STAX        (HL+13h)
+    LDAX        (HL+VOICE_INFO_8640_13_FLAGS_UNKNOWN)
+    ANI         A,11111001b
+    ORI         A,VOICE_INFO_8640_13_2
+
+_store_flag_71b0:
+    STAX        (HL+VOICE_INFO_8640_13_FLAGS_UNKNOWN)
     EI
     RET
 
@@ -15629,7 +15649,7 @@ upd933_write_voice_frequency_71d1:
     MVI         C,UPD933_PITCH
     LDAX        (HL+VOICE_INFO_8640_11_FREQUENCY)
     MOV         EAH,A
-    LDAX        (HL+VOICE_INFO_8640_12_FREQUENCY_HIGH)
+    LDAX        (HL+VOICE_INFO_8640_11_FREQUENCY + 1)
     MOV         EAL,A
     JMP         upd933_load_voice_idx_from_hl_data_in_ea_733f
 
@@ -16914,14 +16934,14 @@ _voice_loop_77c5:
 
     PUSH        HL
     PUSH        EA
-    LDAX        (HL+VOICE_INFO_8640_a)
+    LDAX        (HL+VOICE_INFO_8640_A_NOTE_TARGET)
     CALL        return_pointer_to_voice_ptr_in_hl_plus_1_7d05
-    STAX        (HL+VOICE_INFO_8640_a)
-    LDEAX       (HL+VOICE_INFO_8640_3_PTR_TO_OTHER_VOICE)
+    STAX        (HL+VOICE_INFO_8640_A_NOTE_TARGET)
+    LDEAX       (HL+VOICE_INFO_8640_3_PTR_TO_TONE_MIX_VOICE)
     DMOV        HL,EA
-    STAX        (HL+VOICE_INFO_8640_a)
+    STAX        (HL+VOICE_INFO_8640_A_NOTE_TARGET)
     CALL        return_pointer_to_voice_ptr_in_hl_plus_1_7d05
-    STAX        (HL+VOICE_INFO_8640_a)
+    STAX        (HL+VOICE_INFO_8640_A_NOTE_TARGET)
     POP         EA
     POP         HL
 
@@ -17024,7 +17044,7 @@ LAB_785d:
     ONI         A,VOICE_INFO_8640_15_TONE_MIX
     JR          _restore_interrupt_masking_and_exit_7874
 
-    LDEAX       (HL+VOICE_INFO_8640_3_PTR_TO_OTHER_VOICE)
+    LDEAX       (HL+VOICE_INFO_8640_3_PTR_TO_TONE_MIX_VOICE)
     DMOV        HL,EA
     CALL        UNKNOWN_voice_7878
 
@@ -17048,11 +17068,11 @@ UNKNOWN_voice_7878:
     ONI         A,VOICE_INFO_8640_13_8
     JR          LAB_788c
 
-    LDAX        (HL+VOICE_INFO_8640_9)
-    STAX        (HL+VOICE_INFO_8640_a)
+    LDAX        (HL+VOICE_INFO_8640_NOTE_UNKNOWN)
+    STAX        (HL+VOICE_INFO_8640_A_NOTE_TARGET)
 
     LDAW        (V_OFFSET(data_80D6))
-    STAX        (HL+VOICE_INFO_8640_9)
+    STAX        (HL+VOICE_INFO_8640_NOTE_UNKNOWN)
 
     LDAX        (HL+VOICE_INFO_8640_14_FLAGS_UNKNOWN)
     ORI         A,VOICE_INFO_8640_14_PORTA
@@ -17062,7 +17082,7 @@ UNKNOWN_voice_7878:
 LAB_788c:
     LDAX        (HL+VOICE_INFO_8640_14_FLAGS_UNKNOWN)
     OFFI        A,VOICE_INFO_8640_14_PORTA
-    JR          LAB_7899
+    JR          _porta_flag_set_7899
 
 ; Porta flag not set?
 ; Sets porta flag?
@@ -17071,37 +17091,37 @@ LAB_788c:
     STAX        (HL+VOICE_INFO_8640_14_FLAGS_UNKNOWN)
     JRE         LAB_7921
 
-LAB_7899:
+_porta_flag_set_7899:
     LDAX        (HL+VOICE_INFO_8640_15_FLAGS_UNKNOWN)
     ONI         A,VOICE_INFO_8640_15_8
     JRE         LAB_7921
 
-    LDAX        (HL+VOICE_INFO_8640_10)
+    LDAX        (HL+VOICE_INFO_8640_10_ACC_HIGH)
     MOV         C,A
     LDAX        (HL+VOICE_INFO_8640_15_FLAGS_UNKNOWN)
-    ONI         A,VOICE_INFO_8640_15_10
-    JR          LAB_78ac
+    ONI         A,VOICE_INFO_8640_15_PORTA_DESCENDING
+    JR          _porta_dir_up_78ac
 
-    LDAX        (HL+VOICE_INFO_8640_b)
+    LDAX        (HL+VOICE_INFO_8640_B_NOTE_PREV)
     SUB         A,C
     JR          LAB_78b0
 
-LAB_78ac:
-    LDAX        (HL+VOICE_INFO_8640_b)
+_porta_dir_up_78ac:
+    LDAX        (HL+VOICE_INFO_8640_B_NOTE_PREV)
     ADD         A,C
 
 LAB_78b0:
-    STAX        (HL+VOICE_INFO_8640_a)
-    LDAX        (HL+0Fh)
+    STAX        (HL+VOICE_INFO_8640_A_NOTE_TARGET)
+    LDAX        (HL+VOICE_INFO_8640_F_ACCUMULATOR_MSB)
     EQI         A,0
     JR          LAB_78bd
 
-    LDAX        (HL+VOICE_INFO_8640_e)
+    LDAX        (HL+VOICE_INFO_8640_E_ACCUMULATOR_LSB)
     NEI         A,0
     JRE         LAB_7921
 
 LAB_78bd:
-    LDAX        (HL+VOICE_INFO_8640_a)
+    LDAX        (HL+VOICE_INFO_8640_A_NOTE_TARGET)
     EQAW        (V_OFFSET(data_80D6))
     JR          LAB_78c9
 
@@ -17118,7 +17138,7 @@ LAB_78c9:
 
     LDAW        (V_OFFSET(data_80D6))
     MOV         C,A
-    LDAX        (HL+0ah)
+    LDAX        (HL+VOICE_INFO_8640_A_NOTE_TARGET)
     GTA         C,A
     JRE         LAB_78ff
 
@@ -17162,7 +17182,7 @@ LAB_7907:
     LDAX        (HL+0bh)
     MOV         C,A
     LDAX        (HL+0ah)
-    CALL        FUN_70c4
+    CALL        porta_stores_note_distance_UNKNOWN_70c4
     LDAX        (HL+0Ch)
     LBCD        (portamento_freq_increment_80cd)
     CALL        porta_UNKNOWN_7103
@@ -17682,13 +17702,13 @@ _process_voice_7b5e:
     JR          LAB_7b7a
 
 LAB_7b6e:
-    ANI         B,~VOICE_INFO_8640_15_10
+    ANI         B,~VOICE_INFO_8640_15_PORTA_DESCENDING
     ORI         B,VOICE_INFO_8640_15_8
 
     NEI         A,4
     JR          LAB_7b7a
 
-    ORI         B,VOICE_INFO_8640_15_10
+    ORI         B,VOICE_INFO_8640_15_PORTA_DESCENDING
 
 LAB_7b7a:
     MOV         A,D
@@ -17701,45 +17721,45 @@ LAB_7b7a:
     ONI         D,40h
     JR          LAB_7b8c
 
-    LDAX        (HL+VOICE_INFO_8640_C_WORD)
+    LDAX        (HL+VOICE_INFO_8640_C_NOTE_DISTANCE)
     JR          LAB_7bab
 
 LAB_7b8c:
-    LDAX        (HL+VOICE_INFO_8640_22)
+    LDAX        (HL+VOICE_INFO_8640_22_ACC_INCREMENT_FRACTION)
     MOV         D,A
-    LDAX        (HL+VOICE_INFO_8640_e)
+    LDAX        (HL+VOICE_INFO_8640_E_ACCUMULATOR_LSB)
     ADD         A,D
-    STAX        (HL+VOICE_INFO_8640_e)
-    LDEAX       (HL+VOICE_INFO_8640_23)
+    STAX        (HL+VOICE_INFO_8640_E_ACCUMULATOR_LSB)
+    LDEAX       (HL+VOICE_INFO_8640_23_ACC_INCREMENT_WORD)
     DMOV        DE,EA
     SKN         CY
     INX         DE
-    LDEAX       (HL+VOICE_INFO_8640_F_WORD)
+    LDEAX       (HL+VOICE_INFO_8640_F_ACCUMULATOR_MSB)
     DADD        EA,DE
-    STEAX       (HL+VOICE_INFO_8640_F_WORD)
+    STEAX       (HL+VOICE_INFO_8640_F_ACCUMULATOR_MSB)
     MOV         A,EAH
     MOV         D,A
-    LDAX        (HL+VOICE_INFO_8640_C_WORD)
+    LDAX        (HL+VOICE_INFO_8640_C_NOTE_DISTANCE)
     SUBNB       D,A
     JR          LAB_7bba
 
 LAB_7bab:
     ANI         B,0F7h
-    STAX        (HL+VOICE_INFO_8640_10)
+    STAX        (HL+VOICE_INFO_8640_10_ACC_HIGH)
     MVI         A,0
-    STAX        (HL+VOICE_INFO_8640_e)
-    STAX        (HL+VOICE_INFO_8640_F_WORD)
-    LDAX        (HL+VOICE_INFO_8640_d)
-    STAX        (HL+VOICE_INFO_8640_b)
+    STAX        (HL+VOICE_INFO_8640_E_ACCUMULATOR_LSB)
+    STAX        (HL+VOICE_INFO_8640_F_ACCUMULATOR_MSB)
+    LDAX        (HL+VOICE_INFO_8640_D_NOTE_INCOMING)
+    STAX        (HL+VOICE_INFO_8640_B_NOTE_PREV)
 
 ; This is reached when portamento enabled, and multiple notes active.
 LAB_7bba:
-    LDEAX       (HL+VOICE_INFO_8640_F_WORD)
+    LDEAX       (HL+VOICE_INFO_8640_F_ACCUMULATOR_MSB)
     DMOV        DE,EA
 ; Is this loading the pitch?
-    LDEAX       (HL+VOICE_INFO_8640_1E_PITCH_UNKNOWN)
+    LDEAX       (HL+VOICE_INFO_8640_1E_FREQ_WORD_PREV)
 
-    OFFI        B,VOICE_INFO_8640_15_10
+    OFFI        B,VOICE_INFO_8640_15_PORTA_DESCENDING
     JR          LAB_7bc9
 
     CALL        add_de_to_ea_clamp_at_ffff_0245
@@ -17750,11 +17770,11 @@ LAB_7bc9:
 
 LAB_7bcc:
     ONI         B,VOICE_INFO_8640_15_8
-    STEAX       (HL+VOICE_INFO_8640_1E_PITCH_UNKNOWN)
+    STEAX       (HL+VOICE_INFO_8640_1E_FREQ_WORD_PREV)
     JR          LAB_7bea
 
 LAB_7bd3:
-    LDEAX       (HL+VOICE_INFO_8640_1E_PITCH_UNKNOWN)
+    LDEAX       (HL+VOICE_INFO_8640_1E_FREQ_WORD_PREV)
     ONI         C,VOICE_INFO_8640_14_8
     JR          LAB_7bdb
 
@@ -18007,7 +18027,7 @@ voice_get_pointer_to_voice_data_for_voice_number_7cf8:
 ; HL: Voice info structure (0x8640[v])
 ; =============================================================================
 return_pointer_to_voice_ptr_in_hl_plus_1_7d05:
-    LDEAX       (HL+VOICE_INFO_8640_1_PTR_TO_OTHER_VOICE)
+    LDEAX       (HL+VOICE_INFO_8640_1_PTR_TO_LINE_PAIR_VOICE)
     DMOV        HL,EA
     RET
 
