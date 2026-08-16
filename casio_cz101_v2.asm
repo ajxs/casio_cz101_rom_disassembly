@@ -14541,7 +14541,7 @@ add_8_6c3f:
     CALL        MAYBE_voice_data_reset_6c92
     MVI         B,0FFh
     CALL        voice_resets_8600_array_6d0e
-    CALL        reset_adc_check_UNKNOWN_6d3b
+    CALL        reset_calibrate_pitch_bend_wheel_input_6d3b
     LXI         HL,patch_buffer_edit_8300
     MVI         D,0
     MVIW        (V_OFFSET(UNKNOWN_voice_number_bitmask_80D4)),0FFh
@@ -14701,14 +14701,19 @@ LAB_6d2d:
     RET
 
 ; =============================================================================
-; Reads all AD channels, and checks the total of the values.
+; Calibrates the pitch-bend wheel.
+; Finds its centre value, and sets its upper and lower thresholds accordingly.
+; If the wheel's centre value is within 0x77-0x89, the thresholds are set to
+; +-7 from the centre value. If the wheel's centre value has drifted outside
+; this threshold, +-9 is used.
 ; =============================================================================
-reset_adc_check_UNKNOWN_6d3b:
+reset_calibrate_pitch_bend_wheel_input_6d3b:
 ; Save A/D channel mode.
     MOV         A,ANM
     PUSH        V
 
-; Set A/D channel mode to 3.
+; Set A/D to 'Channel 1' and 'Select Mode'.
+; In this mode, the ADC reads a single channel into CR0-CR3, in sequence.
     MVI         A,3
     MOV         ANM,A
 
@@ -14727,6 +14732,8 @@ reset_adc_check_UNKNOWN_6d3b:
     MVI         A,0FFh
     MOV         MKL,A
 
+; Wait for two full reads of the ADC input before sampling the pitch-bend
+; input, to ensure the values used to calibrate the pitch-bend wheel are stable.
 ; Wait until INTAD occurs.
     MVIW        (V_OFFSET(intein_intad_pending_flag_80ea)),1
     EI
@@ -14744,19 +14751,18 @@ _poll_until_intad_occurs_6d5d:
     OFFIW       (V_OFFSET(intein_intad_pending_flag_80ea)),1
     JR          _poll_until_intad_occurs_6d5d
 
+; Read the A/D input from the pitch-bend wheel four times, summing the values,
+; and averaging them.
     DI
     LXI         EA,0
 
-; Read AN0 (Not connected?).
+; Read the input four times.
     MOV         A,CR0
     EADD        EA,A
-; Read AN1 (Pitch bend).
     MOV         A,CR1
     EADD        EA,A
-; Read AN2 (Battery level).
     MOV         A,CR2
     EADD        EA,A
-; Read AN3 (Not connected?).
     MOV         A,CR3
     EADD        EA,A
 
@@ -14766,15 +14772,15 @@ _poll_until_intad_occurs_6d5d:
     DMOV        BC,EA
 
     MOV         A,C
-    LTI         A,077h        ; Skip if A < 077h
+    LTI         A,077h        ; Skip if A < 0x77.
     JRE         _ad_source_total_above_119_6da2
 
-; Total of the A/D sources is below 119.
-LAB_6d7f:
+; Total of the A/D sources is below 0x77.
+_load_default_values_6d7f:
     MVI         A,80h
     MVI         B,09h
 
-LAB_6d83:
+_store_measurements_and_exit_6d83:
     STAW        (V_OFFSET(pitch_bend_value_initial_80eb))
     STAW        (V_OFFSET(pitch_bend_input_80cc))
     STAW        (V_OFFSET(pitch_bend_value_current_80f0))
@@ -14803,11 +14809,11 @@ _ad_source_total_above_119_6da2:
     GTI         A,089h
     JR          _ad_source_total_less_than_137_6da7
 
-    JRE         LAB_6d7f
+    JRE         _load_default_values_6d7f
 
 _ad_source_total_less_than_137_6da7:
     MVI         B,07h
-    JRE         LAB_6d83
+    JRE         _store_measurements_and_exit_6d83
 
 ; =============================================================================
 called_during_irq_6dab:
