@@ -193,10 +193,9 @@ pitch_bend_value_current_80f0:                                  EQU 80f0h
 UNKNOWN_pitch_bend_80f1:                                        EQU 80f1h
 MAYBE_pitch_bend_initial_polarity_80f2:                         EQU 80f2h
 data_80f3:                                                      EQU 80f3h
-data_80f4:                                                      EQU 80f4h
-; Array with size 8...
-voice_array_80f5:                                               EQU 80f5h
-index_into_80f5_array_80fd:                                     EQU 80fdh
+irq_routine_prescaler_counter_80f4:                             EQU 80f4h
+voice_counters_array_80f5:                                      EQU 80f5h
+voice_counter_array_index_80fd:                                 EQU 80fdh
 ; Bit 0 = Wheel active?
 MAYBE_pitch_bend_wheel_active_flag_80fe:                        EQU 80feh
 channel_info_0_8100:                                            EQU 8100h
@@ -524,6 +523,7 @@ VOICE_INFO_8640_13_FLAGS_UNKNOWN:               EQU 013h
 
 VOICE_INFO_8640_13_80:                          EQU 1 << 7
 VOICE_INFO_8640_13_40:                          EQU 1 << 6
+VOICE_INFO_8640_13_10:                          EQU 1 << 4
 VOICE_INFO_8640_13_8:                           EQU 1 << 3
 VOICE_INFO_8640_13_4:                           EQU 1 << 2
 VOICE_INFO_8640_13_2:                           EQU 1 << 1
@@ -539,10 +539,8 @@ VOICE_INFO_8640_14_PORTA:                       EQU 1 << 4
 
 VOICE_INFO_8640_15_FLAGS_UNKNOWN:               EQU 015h
 
-; Top 4 bits seem to indicate line select / Vibrato.
-VOICE_INFO_8640_15_80:                          EQU 1 << 7
-; This bit seems to select between oscillators?
-VOICE_INFO_8640_15_40:                          EQU 1 << 6
+VOICE_INFO_8640_15_LINE_PAIRED:                 EQU 1 << 7
+VOICE_INFO_8640_15_USES_LINE_2_PARAMS:          EQU 1 << 6
 ; This bit seems to be set when vibrato disabled.
 VOICE_INFO_8640_15_20:                          EQU 1 << 5
 VOICE_INFO_8640_15_PORTA_DESCENDING:            EQU 1 << 4
@@ -8665,7 +8663,7 @@ INT1_INT2_4093:
 INTE0_INTE1_40a9:
 ; Skip if INTE0 not masked.
     OFFI        MKL,MKL_MKE0
-    JMP         called_during_irq_updates_upd933_pitch_7a3c
+    JMP         timer_e1_irq_main_tick_7a3c
 
     SKNIT       FE0
     JRE         irq_reenable_and_return_413a
@@ -8675,7 +8673,7 @@ INTE0_INTE1_40a9:
 
 ; Test if INTFE1 triggered, reset flag if so.
     SKNIT       FE1
-    JMP         called_during_irq_updates_upd933_pitch_7a3c
+    JMP         timer_e1_irq_main_tick_7a3c
 
     JRE         irq_reenable_and_return_40de
 
@@ -11079,7 +11077,7 @@ note_off_UNKNOWN_4a4a:
     PUSH        HL
     PUSH        DE
     CALL        note_on_off_remap_voice_number_UNKNOWN_4a63
-    CALL        note_off_UNKNOWN_7363
+    CALL        note_off_sets_counter_if_midi_UNKNOWN_7363
     POP         DE
     POP         HL
     RET
@@ -14622,7 +14620,7 @@ _reset_voice_loop_6c9b:
 
 ; @NOTE: Load edit patch buffer edit octave setting into A?
     MOV         A,(patch_buffer_edit_8300)
-    ONI         A,2
+    ONI         A,10b
     JR          LAB_6cf1
 
     MVI         C,80h
@@ -14635,12 +14633,12 @@ _reset_voice_loop_6c9b:
     JR          _store_c_in_hl_plus_15_6cf6
 
 ; Voice number is odd.
-    ORI         C,VOICE_INFO_8640_15_40
+    ORI         C,VOICE_INFO_8640_15_USES_LINE_2_PARAMS
     JR          _store_c_in_hl_plus_15_6cf6
 
 LAB_6cf1:
     OFFI        A,1
-    ORI         C,VOICE_INFO_8640_15_40
+    ORI         C,VOICE_INFO_8640_15_USES_LINE_2_PARAMS
 
 _store_c_in_hl_plus_15_6cf6:
     MOV         A,C
@@ -14859,7 +14857,7 @@ upd933_check_irq_dca_6dc3:
     MVI         B,PATCH_DCA1_ENV_STEP_END
 
     LDAX        (HL+VOICE_INFO_8640_15_FLAGS_UNKNOWN)
-    OFFI        A,VOICE_INFO_8640_15_40
+    OFFI        A,VOICE_INFO_8640_15_USES_LINE_2_PARAMS
     MVI         B,PATCH_DCA2_ENV_STEP_END
 
 ; Load this value into A.
@@ -14895,10 +14893,10 @@ upd933_check_irq_dca_6dc3:
     STAX        (HL+VOICE_INFO_8640_D_NOTE_INCOMING)
 
     LDAX        (HL+VOICE_INFO_8640_15_FLAGS_UNKNOWN)
-    ONI         A,VOICE_INFO_8640_15_80
+    ONI         A,VOICE_INFO_8640_15_LINE_PAIRED
     JR          LAB_6e2e
 
-    CALL        return_pointer_to_voice_ptr_in_hl_plus_1_7d05
+    CALL        voice_get_pointer_to_line_pair_voice_7d05
     LDAX        (HL+VOICE_INFO_8640_13_FLAGS_UNKNOWN)
     OFFI        A,VOICE_INFO_8640_13_1
     JRE         LAB_6e66
@@ -14935,10 +14933,10 @@ LAB_6e4c:
     JR          LAB_6e66
 
     LDAX        (HL+VOICE_INFO_8640_15_FLAGS_UNKNOWN)
-    ONI         A,VOICE_INFO_8640_15_80
+    ONI         A,VOICE_INFO_8640_15_LINE_PAIRED
     JR          LAB_6e5e
 
-    CALL        return_pointer_to_voice_ptr_in_hl_plus_1_7d05
+    CALL        voice_get_pointer_to_line_pair_voice_7d05
     LDAX        (HL+VOICE_INFO_8640_13_FLAGS_UNKNOWN)
     OFFI        A,VOICE_INFO_8640_13_1
     JR          LAB_6e66
@@ -15069,7 +15067,7 @@ upd933_note_on_UNKNOWN_6ed0:
     STAW        (V_OFFSET(MAYBE_voice_number_80d3))
     ANI         A,00000111b
     CALL        voice_get_pointer_to_voice_data_for_voice_number_7cf8
-    CALL        clear_80f5_at_index_d_7d83
+    CALL        clear_voice_counter_index_d_7d83
     ANIW        (V_OFFSET(UNKNOWN_flags_80e5)),11110111b
 
 ; Mask all interrupts.
@@ -15083,11 +15081,11 @@ upd933_note_on_UNKNOWN_6ed0:
 
 ; By this point HL = 0x8640.
     LDAX        (HL+VOICE_INFO_8640_15_FLAGS_UNKNOWN)
-    ONI         A,VOICE_INFO_8640_15_80
+    ONI         A,VOICE_INFO_8640_15_LINE_PAIRED
     JR          LAB_6f00
 
     PUSH        HL
-    CALL        return_pointer_to_voice_ptr_in_hl_plus_1_7d05
+    CALL        voice_get_pointer_to_line_pair_voice_7d05
     CALL        upd933_UNKNOWN_6f22
     POP         HL
 
@@ -15104,7 +15102,7 @@ LAB_6f00:
     ONI         A,80h
     JR          LAB_6f18
 
-    CALL        return_pointer_to_voice_ptr_in_hl_plus_1_7d05
+    CALL        voice_get_pointer_to_line_pair_voice_7d05
     CALL        upd933_UNKNOWN_6f22
 LAB_6f18:
     POP         HL
@@ -15140,7 +15138,7 @@ LAB_6f31:
     LDEAX       (HL+VOICE_INFO_8640_5_PTR_TO_PATCH_BFR_EDIT)
     MVI         B,014h
     LDAX        (HL+VOICE_INFO_8640_15_FLAGS_UNKNOWN)
-    OFFI        A,VOICE_INFO_8640_15_40
+    OFFI        A,VOICE_INFO_8640_15_USES_LINE_2_PARAMS
     MVI         B,04Dh
     EADD        EA,B
     DMOV        HL,EA
@@ -15177,7 +15175,7 @@ upd933_UNKNOWN_6f5f:
     CALL        upd933_write_voice_frequency_71d1
 
     LDAX        (HL+VOICE_INFO_8640_15_FLAGS_UNKNOWN)
-    ONI         A,VOICE_INFO_8640_15_80
+    ONI         A,VOICE_INFO_8640_15_LINE_PAIRED
     JR          LAB_6f8a
 
     ORIW        (V_OFFSET(UNKNOWN_flags_80e5)),1
@@ -15666,7 +15664,7 @@ dca_UNKNOWN_71dc:
     MVI         B,PATCH_DCA1_ENV_STEP_END
 
     LDAX        (HL+VOICE_INFO_8640_15_FLAGS_UNKNOWN)
-    OFFI        A,VOICE_INFO_8640_15_40
+    OFFI        A,VOICE_INFO_8640_15_USES_LINE_2_PARAMS
 
     MVI         B,PATCH_DCA2_ENV_STEP_END
     EADD        EA,B
@@ -15755,7 +15753,7 @@ dcw_UNKNOWN_7253:
     MVI         B,PATCH_DCW1_ENV_STEP_END
 
     LDAX        (HL+VOICE_INFO_8640_15_FLAGS_UNKNOWN)
-    OFFI        A,VOICE_INFO_8640_15_40
+    OFFI        A,VOICE_INFO_8640_15_USES_LINE_2_PARAMS
 
     MVI         B,PATCH_DCW2_ENV_STEP_END
 ; EA = Patch buffer edit[DCW1/2 env step end]
@@ -15854,7 +15852,7 @@ dco_UNKNOWN_72d4:
     MVI         B,PATCH_DCO1_ENV_STEP_END
 
     LDAX        (HL+VOICE_INFO_8640_15_FLAGS_UNKNOWN)
-    OFFI        A,VOICE_INFO_8640_15_40
+    OFFI        A,VOICE_INFO_8640_15_USES_LINE_2_PARAMS
 
     MVI         B,PATCH_DCO2_ENV_STEP_END
 ; EA = Patch buffer edit[DCO1/2 env step end]
@@ -15956,30 +15954,28 @@ upd933_load_voice_idx_from_hl_data_in_ea_733f:
 
 ; =============================================================================
 FUN_734d:
-    CALL        clear_80f5_at_index_d_7d83
+    CALL        clear_voice_counter_index_d_7d83
     ORIW        (V_OFFSET(UNKNOWN_flags_80c9)),FLAGS_80C9_10
     JR          note_UNKNOWN_736e
 
 ; =============================================================================
 FUN_7354:
-    CALL        clears_80f5_7d90
+    CALL        clear_voice_counter_array_7d90
     ORIW        (V_OFFSET(UNKNOWN_flags_80c9)),FLAGS_80C9_10
     MVIW        (V_OFFSET(UNKNOWN_voice_number_bitmask_80D4)),0FFh
     MVIW        (V_OFFSET(MAYBE_voice_number_80d3)),0
     MVI         A,0
-    JR          LAB_7376
+    JR          note_UNKNOWN_7376
 
 ; =============================================================================
-note_off_UNKNOWN_7363:
+note_off_sets_counter_if_midi_UNKNOWN_7363:
     ONIW        (V_OFFSET(current_note_event_origin_8015)),KEYBOARD_NOTE_ON
-    JR          note_UNKNOWN_736b
-
-; Flag set?
-    CALL        d_used_as_index_to_store_080_80f5_7da7h
+    JR          note_off_UNKNOWN_736b
+    CALL        set_counter_for_voice_d_7da7
     RET
 
 ; =============================================================================
-note_UNKNOWN_736b:
+note_off_UNKNOWN_736b:
     ANIW        (V_OFFSET(UNKNOWN_flags_80c9)),00001111b
 ; Falls-through below.
 
@@ -15989,46 +15985,56 @@ note_UNKNOWN_736e:
     MOV         A,D
     STAW        (V_OFFSET(MAYBE_voice_number_80d3))
     ANI         A,111b
-LAB_7376:
+; Falls-through below.
+
+; =============================================================================
+note_UNKNOWN_7376:
     CALL        voice_get_pointer_to_voice_data_for_voice_number_7cf8
 
+; HL: Pointer to voice data (0x8640[voice])
     PUSH        HL
-LAB_737a:
+_loop_737a:
     BIT         0,(V_OFFSET(UNKNOWN_voice_number_bitmask_80D4))
-    JRE         LAB_73b3
+    JRE         _advance_loop_73b3
 
     CALL        voice_process_envelopes_MAYBE_73d4
-    CALL        FUN_73c7
-    LDAX        (HL+15h)
-    ONI         A,80h
-    JR          LAB_7394
+    CALL        voice_set_flags_if_solo_tone_mix_UNKNOWN_73c7
 
+    LDAX        (HL+VOICE_INFO_8640_15_FLAGS_UNKNOWN)
+    ONI         A,VOICE_INFO_8640_15_LINE_PAIRED
+    JR          _is_tone_mix_active_7394
+
+; Flag active.
     PUSH        HL
-    CALL        return_pointer_to_voice_ptr_in_hl_plus_1_7d05
+    CALL        voice_get_pointer_to_line_pair_voice_7d05
     CALL        voice_process_envelopes_MAYBE_73d4
-    CALL        FUN_73c7
+    CALL        voice_set_flags_if_solo_tone_mix_UNKNOWN_73c7
     POP         HL
-LAB_7394:
-    LDAX        (HL+15h)
-    ONI         A,2
-    JR          LAB_73b3
 
+_is_tone_mix_active_7394:
+    LDAX        (HL+VOICE_INFO_8640_15_FLAGS_UNKNOWN)
+    ONI         A,VOICE_INFO_8640_15_TONE_MIX
+    JR          _advance_loop_73b3
+
+; Tone mix active.
     PUSH        HL
-    LDEAX       (HL+3)
+    LDEAX       (HL+VOICE_INFO_8640_3_PTR_TO_TONE_MIX_VOICE)
     DMOV        HL,EA
     CALL        voice_process_envelopes_MAYBE_73d4
-    CALL        FUN_73c7
-    LDAX        (HL+15h)
-    ONI         A,80h
+    CALL        voice_set_flags_if_solo_tone_mix_UNKNOWN_73c7
+
+    LDAX        (HL+VOICE_INFO_8640_15_FLAGS_UNKNOWN)
+    ONI         A,VOICE_INFO_8640_15_LINE_PAIRED
     JR          LAB_73b2
 
-    CALL        return_pointer_to_voice_ptr_in_hl_plus_1_7d05
+    CALL        voice_get_pointer_to_line_pair_voice_7d05
     CALL        voice_process_envelopes_MAYBE_73d4
-    CALL        FUN_73c7
+    CALL        voice_set_flags_if_solo_tone_mix_UNKNOWN_73c7
+
 LAB_73b2:
     POP         HL
 
-LAB_73b3:
+_advance_loop_73b3:
 ; Add 0x28 to L to move to next voice.
 ; Add 1 to H if this carries.
     ADINC       L,028h
@@ -16039,19 +16045,22 @@ LAB_73b3:
     SLR         A
     STAW        (V_OFFSET(UNKNOWN_voice_number_bitmask_80D4))
     EQI         A,0
-    JRE         LAB_737a
+    JRE         _loop_737a
 
     POP         HL
     RET
 
 ; =============================================================================
-FUN_73c7:
+; HL: Voice data (0x8640[voice])
+; =============================================================================
+voice_set_flags_if_solo_tone_mix_UNKNOWN_73c7:
     ONIW        (V_OFFSET(UNKNOWN_flags_8031)),FLAGS_8031_SOLO_MODE | FLAGS_8031_TONE_MIX
     RET
+
     DI
-    LDAX        (HL+13h)
-    ORI         A,050h
-    STAX        (HL+13h)
+    LDAX        (HL+VOICE_INFO_8640_13_FLAGS_UNKNOWN)
+    ORI         A,VOICE_INFO_8640_13_40 | VOICE_INFO_8640_13_10
+    STAX        (HL+VOICE_INFO_8640_13_FLAGS_UNKNOWN)
     EI
     RET
 
@@ -16075,7 +16084,7 @@ voice_process_envelopes_MAYBE_73d4:
     LDEAX       (HL+VOICE_INFO_8640_5_PTR_TO_PATCH_BFR_EDIT)
     MVI         B,PATCH_DCA1_ENV_STEP_END
     LDAX        (HL+VOICE_INFO_8640_15_FLAGS_UNKNOWN)
-    OFFI        A,VOICE_INFO_8640_15_40
+    OFFI        A,VOICE_INFO_8640_15_USES_LINE_2_PARAMS
     MVI         B,PATCH_DCA2_ENV_STEP_END
     EADD        EA,B
 
@@ -16199,7 +16208,7 @@ UNKNOWN_upd933_updates_waveform_7454:
     PUSH        HL
 
     LDAX        (HL+VOICE_INFO_8640_15_FLAGS_UNKNOWN)
-    OFFI        A,VOICE_INFO_8640_15_40
+    OFFI        A,VOICE_INFO_8640_15_USES_LINE_2_PARAMS
     JR          _gets_dco2_waveform_1_MAYBE_7465
 
     CALL        MAYBE_get_pointer_to_edit_buffer_7d0a
@@ -16216,7 +16225,7 @@ LAB_746b:
     PUSH        HL
 
     LDAX        (HL+VOICE_INFO_8640_15_FLAGS_UNKNOWN)
-    OFFI        A,VOICE_INFO_8640_15_80
+    OFFI        A,VOICE_INFO_8640_15_LINE_PAIRED
     JR          LAB_7478
 
     ANI         D,0c0h
@@ -16227,9 +16236,9 @@ LAB_7478:
     JR          LAB_749b
 
     PUSH        HL
-    CALL        return_pointer_to_voice_ptr_in_hl_plus_1_7d05
+    CALL        voice_get_pointer_to_line_pair_voice_7d05
     LDAX        (HL+VOICE_INFO_8640_15_FLAGS_UNKNOWN)
-    OFFI        A,VOICE_INFO_8640_15_40
+    OFFI        A,VOICE_INFO_8640_15_USES_LINE_2_PARAMS
     JR          LAB_748c
 
     CALL        MAYBE_get_pointer_to_edit_buffer_7d0a
@@ -16371,7 +16380,7 @@ _odd_numbered_voice_7536:
     LDAX        (HL+VOICE_INFO_8640_15_FLAGS_UNKNOWN)
     LBCD        (upd933_data_master_tune_80ca)
     DMOV        EA,BC
-    OFFI        A,VOICE_INFO_8640_15_80
+    OFFI        A,VOICE_INFO_8640_15_LINE_PAIRED
     JR          LAB_7548
 
 LAB_7540:
@@ -16563,7 +16572,7 @@ FUN_7608:
     JR          LAB_7617
 
     LDAX        (HL+0ah)
-    CALL        return_pointer_to_voice_ptr_in_hl_plus_1_7d05
+    CALL        voice_get_pointer_to_line_pair_voice_7d05
     STAX        (HL+0ah)
 LAB_7617:
     POP         HL
@@ -16761,8 +16770,8 @@ LAB_7712:
     LDED        (UNKNOWN_pointer_to_patch_data_80d1)
 
     LDAX        (HL+VOICE_INFO_8640_15_FLAGS_UNKNOWN)
-    ANI         A,~VOICE_INFO_8640_15_40
-    OFFI        A,VOICE_INFO_8640_15_80
+    ANI         A,~VOICE_INFO_8640_15_USES_LINE_2_PARAMS
+    OFFI        A,VOICE_INFO_8640_15_LINE_PAIRED
     JR          LAB_772a
 
     BIT         0,(V_OFFSET(UNKNOWN_flags_80c9))
@@ -16792,12 +16801,12 @@ LAB_7737:
     JR          LAB_773c
 
 LAB_773a:
-    ORI         A,40h
+    ORI         A,VOICE_INFO_8640_15_USES_LINE_2_PARAMS
 LAB_773c:
-    STAX        (HL+15h)
+    STAX        (HL+VOICE_INFO_8640_15_FLAGS_UNKNOWN)
     LDED        (UNKNOWN_pointer_to_patch_data_80d1)
     DMOV        EA,DE
-    STEAX       (HL+5)
+    STEAX       (HL+VOICE_INFO_8640_5_PTR_TO_PATCH_BFR_EDIT)
 
 ; Restore original interrupt masking.
     POP         V
@@ -16935,12 +16944,12 @@ _voice_loop_77c5:
     PUSH        HL
     PUSH        EA
     LDAX        (HL+VOICE_INFO_8640_A_NOTE_TARGET)
-    CALL        return_pointer_to_voice_ptr_in_hl_plus_1_7d05
+    CALL        voice_get_pointer_to_line_pair_voice_7d05
     STAX        (HL+VOICE_INFO_8640_A_NOTE_TARGET)
     LDEAX       (HL+VOICE_INFO_8640_3_PTR_TO_TONE_MIX_VOICE)
     DMOV        HL,EA
     STAX        (HL+VOICE_INFO_8640_A_NOTE_TARGET)
-    CALL        return_pointer_to_voice_ptr_in_hl_plus_1_7d05
+    CALL        voice_get_pointer_to_line_pair_voice_7d05
     STAX        (HL+VOICE_INFO_8640_A_NOTE_TARGET)
     POP         EA
     POP         HL
@@ -16987,11 +16996,11 @@ _voice_loop_7819:
     MOV         A,C
     STAX        (HL+VOICE_INFO_8640_25)
     LDAX        (HL+VOICE_INFO_8640_15_FLAGS_UNKNOWN)
-    ONI         A,VOICE_INFO_8640_15_80
+    ONI         A,VOICE_INFO_8640_15_LINE_PAIRED
     JR          LAB_782c
 
     PUSH        HL
-    CALL        return_pointer_to_voice_ptr_in_hl_plus_1_7d05
+    CALL        voice_get_pointer_to_line_pair_voice_7d05
     MOV         A,C
     STAX        (HL+VOICE_INFO_8640_25)
     POP         HL
@@ -17033,10 +17042,10 @@ FUN_7842:
     CALL        UNKNOWN_voice_7878
 
     LDAX        (HL+VOICE_INFO_8640_15_FLAGS_UNKNOWN)
-    ONI         A,VOICE_INFO_8640_15_80
+    ONI         A,VOICE_INFO_8640_15_LINE_PAIRED
     JR          LAB_785d
 
-    CALL        return_pointer_to_voice_ptr_in_hl_plus_1_7d05
+    CALL        voice_get_pointer_to_line_pair_voice_7d05
     CALL        UNKNOWN_voice_7878
 
 LAB_785d:
@@ -17049,10 +17058,10 @@ LAB_785d:
     CALL        UNKNOWN_voice_7878
 
     LDAX        (HL+VOICE_INFO_8640_15_FLAGS_UNKNOWN)
-    ONI         A,VOICE_INFO_8640_15_80
+    ONI         A,VOICE_INFO_8640_15_LINE_PAIRED
     JR          _restore_interrupt_masking_and_exit_7874
 
-    CALL        return_pointer_to_voice_ptr_in_hl_plus_1_7d05
+    CALL        voice_get_pointer_to_line_pair_voice_7d05
     CALL        UNKNOWN_voice_7878
 
 _restore_interrupt_masking_and_exit_7874:
@@ -17237,11 +17246,11 @@ _voice_loop_7943:
 
 ; Tone mix inactive.
     LDAX        (HL+VOICE_INFO_8640_15_FLAGS_UNKNOWN)
-    ONI         A,VOICE_INFO_8640_15_80
+    ONI         A,VOICE_INFO_8640_15_LINE_PAIRED
     JR          _enable_interrupts_and_move_to_next_voice_795c
 
     PUSH        HL
-    CALL        return_pointer_to_voice_ptr_in_hl_plus_1_7d05
+    CALL        voice_get_pointer_to_line_pair_voice_7d05
     CALL        UNKNOWN_voice_portamento_79be
     POP         HL
 
@@ -17303,11 +17312,11 @@ _voice_loop_7983:
     JR          _enable_irq_move_to_next_voice_799c
 
     LDAX        (HL+VOICE_INFO_8640_15_FLAGS_UNKNOWN)
-    ONI         A,VOICE_INFO_8640_15_80
+    ONI         A,VOICE_INFO_8640_15_LINE_PAIRED
     JR          _enable_irq_move_to_next_voice_799c
 
     PUSH        HL
-    CALL        return_pointer_to_voice_ptr_in_hl_plus_1_7d05
+    CALL        voice_get_pointer_to_line_pair_voice_7d05
     CALL        UNKNOWN_voice_info_vibrato_79af
     POP         HL
 
@@ -17449,7 +17458,7 @@ portamento_data_time_less_than_5_7a32:
     DW          0280h
 
 ; =============================================================================
-called_during_irq_updates_upd933_pitch_7a3c:
+timer_e1_irq_main_tick_7a3c:
     PUSH        V
     MOV         A,MKL
 ; Mask all interrupts.
@@ -17462,22 +17471,23 @@ called_during_irq_updates_upd933_pitch_7a3c:
     PUSH        HL
     EI
 
-    LDAW        (V_OFFSET(data_80f4))
+; Ensure the full routine only runs every 2 iterations.
+    LDAW        (V_OFFSET(irq_routine_prescaler_counter_80f4))
     INR         A
-    ONI         A,2
-    JR          LAB_7a55
+    ONI         A,10b
+    JR          _run_short_routine_7a55
 
-    CALL        loops_over_80f5_UNKNOWN_7db2
+    CALL        increment_voice_counters_7db2
 
-    MVIW        (V_OFFSET(data_80f4)),0
-    JR          LAB_7a5d
+    MVIW        (V_OFFSET(irq_routine_prescaler_counter_80f4)),0
+    JR          _run_full_routine_7a5d
 
-LAB_7a55:
-    STAW        (V_OFFSET(data_80f4))
-    CALL        loops_over_80f5_UNKNOWN_7db2
+_run_short_routine_7a55:
+    STAW        (V_OFFSET(irq_routine_prescaler_counter_80f4))
+    CALL        increment_voice_counters_7db2
     JMP         _exit_7ced
 
-LAB_7a5d:
+_run_full_routine_7a5d:
 ; A = 5 if not in solo mode.
 ; Otherwise currently selected solo midi voice.
     LDAW        (V_OFFSET(currently_selected_solo_midi_channel_8025))
@@ -18026,7 +18036,7 @@ voice_get_pointer_to_voice_data_for_voice_number_7cf8:
 ; =============================================================================
 ; HL: Voice info structure (0x8640[v])
 ; =============================================================================
-return_pointer_to_voice_ptr_in_hl_plus_1_7d05:
+voice_get_pointer_to_line_pair_voice_7d05:
     LDEAX       (HL+VOICE_INFO_8640_1_PTR_TO_LINE_PAIR_VOICE)
     DMOV        HL,EA
     RET
@@ -18192,81 +18202,93 @@ _exit_flag_off_7d7f:
 ; Clears the entry at 0x80f5[D].
 ; D: Voice#?
 ; =============================================================================
-clear_80f5_at_index_d_7d83:
+clear_voice_counter_index_d_7d83:
     PUSH        HL
 ; B = D & 111b.
 ; Index clamped at 0-7.
     MOV         A,D
     ANI         A,111b
     MOV         B,A
-    LXI         HL,voice_array_80f5
+    LXI         HL,voice_counters_array_80f5
     MVI         A,0
     STAX        (HL+B)
     POP         HL
     RET
 
 ; =============================================================================
-; Clears the array at 0x80f5
+; Clears the voice counter array at 0x80f5
 ; =============================================================================
-clears_80f5_7d90:
-    LXI         HL,voice_array_80f5
+clear_voice_counter_array_7d90:
+    LXI         HL,voice_counters_array_80f5
 
     MVI         A,0
-    STAW        (V_OFFSET(index_into_80f5_array_80fd))
+    STAW        (V_OFFSET(voice_counter_array_index_80fd))
 
 _clear_array_loop_7d97:
+; Clear the entry.
     DI
-    LDAW        (V_OFFSET(index_into_80f5_array_80fd))
+    LDAW        (V_OFFSET(voice_counter_array_index_80fd))
     MOV         B,A
     MVI         A,0
     STAX        (HL+B)
     EI
+
+; Increment index, and check whether it's reached 8.
     MOV         A,B
     INR         A
-    STAW        (V_OFFSET(index_into_80f5_array_80fd))
+    STAW        (V_OFFSET(voice_counter_array_index_80fd))
     ONI         A,1000b
     JR          _clear_array_loop_7d97
 
     RET
 
 ; =============================================================================
-d_used_as_index_to_store_080_80f5_7da7h:
+; D: Voice# (0-7)
+; =============================================================================
+set_counter_for_voice_d_7da7:
     MOV         A,D
     ANI         A,7
     MOV         B,A
-    LXI         HL,voice_array_80f5
+    LXI         HL,voice_counters_array_80f5
     MVI         A,80h
     STAX        (HL+B)
     RET
 
 ; =============================================================================
-loops_over_80f5_UNKNOWN_7db2:
-    LXI         HL,voice_array_80f5
+increment_voice_counters_7db2:
+    LXI         HL,voice_counters_array_80f5
     MVI         A,0
-    STAW        (V_OFFSET(index_into_80f5_array_80fd))
+    STAW        (V_OFFSET(voice_counter_array_index_80fd))
 
-LAB_7db9:
+; This loop increments the counter at 0x80f5[D] for each voice, if that voice's
+; flag (bit 7) is set. The counter counts from 1 .. 4.
+_increment_counter_loop_7db9:
     DI
 
 ; Load 0x80f5[A].
-    LDAW        (V_OFFSET(index_into_80f5_array_80fd))
+    LDAW        (V_OFFSET(voice_counter_array_index_80fd))
     MOV         B,A
     LDAX        (HL+B)
 
-; Increment A, and see if it's 0x80.
+; Increment A.
     INR         A
-    ONI         A,80h   ; Skip if A & ? != 0.
+
+; If bit 7 isn't set, reset and exit.
+    ONI         A,10000000b               ; Skip if A & ? != 0.
     JR          _reset_value_7dd0
 
-    ONI         A,04h   ; Skip if A & ? != 0.
+; If bit 2 is set, process...
+    ONI         A,100b                    ; Skip if A & ? != 0.
     JR          _store_byte_7dd2
 
+; D = Voice# (0x80fd).
     MOV         A,B
     PUSH        HL
     PUSH        BC
     MOV         D,A
+
     EI
-    CALL        note_UNKNOWN_736b
+    CALL        note_off_UNKNOWN_736b
     DI
     POP         BC
     POP         HL
@@ -18279,11 +18301,11 @@ _store_byte_7dd2:
     EI
 
 ; Increment index. Exit if reached 8.
-    LDAW        (V_OFFSET(index_into_80f5_array_80fd))
+    LDAW        (V_OFFSET(voice_counter_array_index_80fd))
     INR         A
-    STAW        (V_OFFSET(index_into_80f5_array_80fd))
+    STAW        (V_OFFSET(voice_counter_array_index_80fd))
     ONI         A,8
-    JRE         LAB_7db9
+    JRE         _increment_counter_loop_7db9
 
     RET
 
