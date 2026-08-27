@@ -137,7 +137,7 @@ sysex_patch_index_UNKNOWN_8069:                                 EQU 8069h
 unknown_806a:                                                   EQU 806ah
 UNKNOWN_counter_806b:                                           EQU 806bh
 
-MAYBE_pitch_bend_increment_80c0:                                EQU 80c0h
+pitch_bend_increment_80c0:                                      EQU 80c0h
 upd933_data_waveform_index_80c2:                                EQU 80c2h
 upd933_data_waveform_msb_80c3:                                  EQU 80c3h
 upd933_data_waveform_lsb_80c4:                                  EQU 80c4h
@@ -9423,8 +9423,8 @@ MAYBE_reset_timers_flags_upd933_4428:
     CALL        MAYBE_upd933_reset_6c00
 
 ; Clamp at 11.
-    LTIW        (V_OFFSET(MAYBE_key_transpose_8002)),0Ch
-    MVIW        (V_OFFSET(MAYBE_key_transpose_8002)),0bh
+    LTIW        (V_OFFSET(MAYBE_key_transpose_8002)),12
+    MVIW        (V_OFFSET(MAYBE_key_transpose_8002)),11
     CALL        master_tune_update_28fe
 
     CALL        portamento_time_calculate_final_value_7a16
@@ -14500,7 +14500,7 @@ _reset_env_voice_loop_6c17:
     JR          _move_to_next_env_MAYBE_6c3a
 
     EQI         C,20h                               ; Skip if C == 020h.
-    JR          add_8_6c3f
+    JR          _add_8_6c3f
 
 ; If C is 020h, clear 080E8h, and 080E9h,
 ; skip to register 60h (Pitch).
@@ -14515,7 +14515,7 @@ _move_to_next_env_MAYBE_6c3a:
     ADI         C,10h
     JRE         _reset_env_loop_6c14
 
-add_8_6c3f:
+_add_8_6c3f:
     ADI         C,8
     EQI         C,0C0h                              ; Skip if C == 0c0h.
     JRE         _reset_env_loop_6c14
@@ -14534,7 +14534,7 @@ add_8_6c3f:
 
 ; Reset the internal UPD933 data buffers?
     LXI         HL,upd933_data_init_7dfe
-    LXI         DE,MAYBE_pitch_bend_increment_80c0
+    LXI         DE,pitch_bend_increment_80c0
     MVI         C,14
     BLOCK
 
@@ -17026,6 +17026,7 @@ _voice_loop_7819:
     MOV         A,C
     STAX        (HL+VOICE_INFO_8640_25)
     POP         HL
+
 LAB_782c:
     EI
 
@@ -17401,15 +17402,18 @@ pitch_bend_range_modified_79d0:
 ; Clamp at 12.
     LTI         A,12                                ; Skip if (r<byte)
     MVI         A,12
+
+; Load the pitch-bend increment word from this table.
     LXI         HL,pitch_bend_curve_03a9
     DCR         A
+; Double A to index the table.
     ADD         A,A
     LDEAX       (HL+A)
     DMOV        DE,EA
 
 _store_and_exit_79e2:
     DI
-    SDED        (MAYBE_pitch_bend_increment_80c0)
+    SDED        (pitch_bend_increment_80c0)
     ORIW        (V_OFFSET(UNKNOWN_flags_80c8)),FLAGS_80C8_8
     EI
     RET
@@ -17680,7 +17684,7 @@ LAB_7b1f:
     NEI         A,064h
     JR          LAB_7b3b
 
-    LBCD        (MAYBE_pitch_bend_increment_80c0)
+    LBCD        (pitch_bend_increment_80c0)
     CALL        multiply_a_by_bc_0236
     DSLR        EA
     DSLR        EA
